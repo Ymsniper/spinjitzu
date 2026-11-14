@@ -3,6 +3,9 @@
 // turn the game as far as a count from the hand? Keys, hand movement and
 // ticks go in, timestamped; counts to send and lines for the log come out.
 //
+// Every action can be bound to any key or mouse button; these are the keys
+// until the user binds others.
+//
 //   F8   a full turn by hand: press, turn back onto the mark, press. Again
 //        for a better figure: the median of all of them is used.
 //        After a turn by the tool: the crosshair is back on the mark.
@@ -26,7 +29,12 @@
 
 namespace spinjitzu::spike {
 
-enum Key { kF8 = 66, kF9 = 67, kF10 = 68, kF12 = 88 };   // linux/input-event-codes.h
+enum Key { kF7 = 65, kF8 = 66, kF9 = 67, kF10 = 68, kF12 = 88 };   // linux/input-event-codes.h
+
+enum Action { kHand, kTurns, kFive, kFlat, kQuit, kActions };
+inline constexpr int kDefaultKey[kActions] = {kF8, kF9, kF10, kF7, kF12};
+inline const char* const kActionName[kActions] = {"hand 360", "slow and fast turn", "five turns", "flat acceleration", "quit"};
+inline const char* const kActionWord[kActions] = {"hand", "turns", "five", "flat", "quit"};   // in the keys file
 
 class Session {
 public:
@@ -35,6 +43,10 @@ public:
 
     // A key the system already reports held when the tool starts: its press
     // was not ours to see, so it acts only after a release.
+    // Which key or button does an action, and the name to call it by.
+    void bind(Action a, int code, const std::string& name) { keys_[a] = code; names_[a] = name; }
+    int keyOf(Action a) const { return keys_[a]; }
+
     void heldAtStart(int code) { if (code >= 0 && code < 768) down_[code] = true; }
 
     void key(int code, int value, Ns now) {
@@ -52,10 +64,10 @@ public:
     // The system dropped events, or a send failed: the step under way has
     // lost counts, so it gives no figure.
     void spoiled(const char* why) {
-        if (phase_ == Phase::Recording) { cal_.cancel(); phase_ = Phase::Idle; say("%s: hand 360 dropped, do it again (F8)", why); return; }
+        if (phase_ == Phase::Recording) { cal_.cancel(); phase_ = Phase::Idle; say("%s: hand 360 dropped, do it again (%s)", why, n(kHand)); return; }
         if (phase_ == Phase::Sending || phase_ == Phase::Correcting) {
             void_ = true;
-            say("%s: this turn will give no figure; finish it with F8 and do F9 again", why);
+            say("%s: this turn will give no figure; finish it with %s and do %s again", why, n(kHand), n(kTurns));
         }
     }
 
@@ -74,13 +86,13 @@ public:
     // Counts to send through the virtual mouse now.
     int64_t tick(Ns now) {
         if (phase_ != Phase::Sending) return 0;
-        const int64_t n = motion_.step(now);
-        sentThisTurn_ += n;
+        const int64_t counts = motion_.step(now);
+        sentThisTurn_ += counts;
         if (motion_.done()) {
             phase_ = Phase::Correcting;
-            say("sent %lld counts. Put the crosshair back on the mark by hand, then F8.", (long long)sentThisTurn_);
+            say("sent %lld counts. Put the crosshair back on the mark by hand, then %s.", (long long)sentThisTurn_, n(kHand));
         }
-        return n;
+        return counts;
     }
 
     bool wantsTicks() const { return phase_ == Phase::Sending; }
@@ -151,10 +163,10 @@ private:
     }
 
     void press(int code, Ns now) {
-        if (code == kF12) { quit_ = true; say("quitting"); return; }
+        if (code == keys_[kQuit]) { quit_ = true; say("quitting"); return; }
         if (phase_ == Phase::Sending) { say("a key while the tool turns is ignored"); return; }
 
-        if (code == kF8) {
+        if (code == keys_[kHand]) {
             if (phase_ == Phase::Correcting) { corrected(now); return; }
             if (phase_ == Phase::Recording) {
                 const int64_t net = cal_.net();
@@ -173,19 +185,19 @@ private:
             cal_.start();
             resetPace();
             phase_ = Phase::Recording;
-            say("recording: turn one full circle by hand back onto the mark, then F8");
+            say("recording: turn one full circle by hand back onto the mark, then %s", n(kHand));
             return;
         }
-        if (phase_ == Phase::Recording) { say("finish the hand turn with F8 first"); return; }
-        if (code == kF9) {
-            if (!c_) { say("F9 needs a hand 360 first (F8)"); return; }
+        if (phase_ == Phase::Recording) { say("finish the hand turn with %s first", n(kHand)); return; }
+        if (code == keys_[kTurns]) {
+            if (!c_) { say("%s needs a hand 360 first (%s)", n(kTurns), n(kHand)); return; }
             say("slow turn: %lld counts over %.1f s", (long long)c_, kSlowSec);
             startSend(c_, kSlowSec, Step::Slow, now);
             return;
         }
-        if (code == kF10) {
-            if (!cVirtual_) { say("F10 needs F9 done first"); return; }
-            if (speedMatters_) { say("F10 means nothing while acceleration is in the path: F7 for flat, then F9 again"); return; }
+        if (code == keys_[kFive]) {
+            if (!cVirtual_) { say("%s needs %s done first", n(kFive), n(kTurns)); return; }
+            if (speedMatters_) { say("%s means nothing while acceleration is in the path: %s for flat, then %s again", n(kFive), n(kFlat), n(kTurns)); return; }
             Ledger l(cVirtual_);
             const int64_t n = l.begin(5 * kFullTurnMilli);
             say("five turns: %lld counts at C = %lld", (long long)n, (long long)cVirtual_);
@@ -200,7 +212,7 @@ private:
         (void)now;
         phase_ = Phase::Idle;
         const int64_t k = correction_;
-        if (void_) { say("that turn lost counts and gives no figure: F9 again"); return; }
+        if (void_) { say("that turn lost counts and gives no figure: %s again", n(kTurns)); return; }
         say("correction %s", pace().c_str());
         if (duringSend_ != 0)
             say("note: the hand moved %+lld counts while the tool was turning; counted in the correction", (long long)duringSend_);
@@ -230,7 +242,7 @@ private:
             say("RESULT scale: C for the virtual mouse = %lld against %lld by hand (ratio %.5f). %s", (long long)cVirtual_,
                 (long long)c_, (double)cVirtual_ / (double)c_,
                 same ? "It turns the game as the hand does." : "It turns the game by a different amount.");
-            say("F10 checks it with five turns in a row.");
+            say("%s checks it with five turns in a row.", n(kFive));
             return;
         }
         if (step_ == Step::Five) {
@@ -255,6 +267,9 @@ private:
     Ns first_ = 0, last_ = 0;
     int64_t fastest_ = 0;
     bool down_[768] = {};
+    int keys_[kActions] = {kF8, kF9, kF10, kF7, kF12};
+    std::string names_[kActions] = {"F8", "F9", "F10", "F7", "F12"};
+    const char* n(Action a) const { return names_[a].c_str(); }
     std::deque<std::string> lines_;
 };
 

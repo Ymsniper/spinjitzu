@@ -216,6 +216,16 @@ int main() {
         s.key(kF12, 1, kTick);
         chk(s.quit(), "F12 quits");
     }
+    {
+        Session s;
+        const int side = 0x113;   // BTN_SIDE, a mouse's side button
+        s.bind(kHand, side, "BTN_SIDE");
+        s.key(kF8, 1, kTick);
+        chk(s.take().empty(), "rebound, the old key does nothing");
+        s.key(side, 1, 2 * kTick);
+        auto l = s.take();
+        chk(!l.empty() && l[0].find("then BTN_SIDE") != std::string::npos, "the mouse's side button does the hand 360, and the log names it");
+    }
 
     printf("%s (%d of %d failed)\n", g_bad ? "FAILED" : "all good", g_bad, g_n);
     return g_bad ? 1 : 0;

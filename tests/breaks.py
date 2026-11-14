@@ -88,11 +88,14 @@ BREAKS = [
      "if (phase_ == Phase::Sending) { duringSend_ += dx; correction_ += dx; }",
      "if (phase_ == Phase::Sending) { duringSend_ += dx; }"),
     (SESSION, "a turn that lost events still gives a figure",
-     "if (void_) { say(\"that turn lost counts and gives no figure: F9 again\"); return; }",
+     "if (void_) { say(\"that turn lost counts and gives no figure: %s again\", n(kTurns)); return; }",
      ""),
     (SESSION, "F10 runs with acceleration in the path",
-     "if (speedMatters_) { say(\"F10 means nothing while acceleration is in the path: F7 for flat, then F9 again\"); return; }",
+     "if (speedMatters_) { say(\"%s means nothing while acceleration is in the path: %s for flat, then %s again\", n(kFive), n(kFlat), n(kTurns)); return; }",
      ""),
+    (SESSION, "the hand 360 stays on F8 whatever is bound",
+     "if (code == keys_[kHand]) {",
+     "if (code == kF8) {"),
 ]
 BREAKS = [b if len(b) == 4 else (ENGINE,) + b for b in BREAKS]
 

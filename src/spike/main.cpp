@@ -1,14 +1,18 @@
 // The calibration check on real devices: the keyboard and the mouse read
 // directly, a virtual mouse of its own to turn with, a 1 ms timer, and
 // spike.log in the folder it is run from. See session.hpp for the keys.
+// `--bind` binds each action to any key or mouse button, as a game's
+// binding screen does, and keeps them in spike.keys.
 //
-//   g++ -std=c++20 -O2 -Wall -Wextra -o build/spike src/spike/main.cpp && build/spike
+//   g++ -std=c++20 -O2 -Wall -Wextra -o build/spike src/spike/main.cpp $(pkg-config --cflags --libs libevdev)
+//   build/spike [--bind]
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <dirent.h>
+#include <libevdev/libevdev.h>
 #include <fcntl.h>
 #include <linux/input.h>
 #include <linux/uinput.h>
@@ -51,7 +55,7 @@ static bool bit(const unsigned long* bits, int n) {
 struct Dev {
     int fd = -1;
     std::string path, name, node;   // node: eventN
-    bool keyboard = false, mouse = false;
+    bool keys = false, mouse = false;   // keys: it has keys or buttons
     unsigned vendor = 0, product = 0;
 };
 
@@ -179,9 +183,9 @@ static std::vector<Dev> findDevices() {
         ioctl(v.fd, EVIOCGBIT(0, sizeof ev), ev);
         if (bit(ev, EV_KEY)) ioctl(v.fd, EVIOCGBIT(EV_KEY, sizeof keys), keys);
         if (bit(ev, EV_REL)) ioctl(v.fd, EVIOCGBIT(EV_REL, sizeof rels), rels);
-        v.keyboard = bit(ev, EV_KEY) && bit(keys, KEY_F8);
+        v.keys = bit(ev, EV_KEY) && v.name != kOwnName;
         v.mouse = bit(ev, EV_REL) && bit(rels, REL_X) && v.name != kOwnName;
-        if (!v.keyboard && !v.mouse) { close(v.fd); continue; }
+        if (!v.keys && !v.mouse) { close(v.fd); continue; }
         out.push_back(v);
     }
     closedir(d);
@@ -190,7 +194,87 @@ static std::vector<Dev> findDevices() {
 
 static void onSignal(int) { g_stop = 1; }
 
-int main() {
+// A key or button as people know it: F8, not KEY_F8.
+static std::string keyName(int code) {
+    const char* n = libevdev_event_code_get_name(EV_KEY, code);
+    if (!n) return "key " + std::to_string(code);
+    const std::string s = n;
+    return s.rfind("KEY_", 0) == 0 ? s.substr(4) : s;
+}
+
+static const char* kKeysFile = "spike.keys";
+
+// The keys file: one `action = NAME` a line, NAME as the kernel names it
+// (KEY_F8, BTN_SIDE), so it reads back the same on any keyboard layout.
+static void loadKeys(int keys[kActions]) {
+    FILE* f = fopen(kKeysFile, "r");
+    if (!f) return;
+    char word[32], name[64];
+    while (fscanf(f, " %31[a-z] = %63s", word, name) == 2)
+        for (int a = 0; a < kActions; a++)
+            if (!strcmp(word, kActionWord[a])) {
+                const int code = libevdev_event_code_from_name(EV_KEY, name);
+                if (code > 0 && code < 768) keys[a] = code;
+            }
+    fclose(f);
+}
+
+static void saveKeys(const int keys[kActions]) {
+    FILE* f = fopen(kKeysFile, "w");
+    if (!f) { logLine(std::string("cannot write ") + kKeysFile + ": " + strerror(errno)); return; }
+    for (int a = 0; a < kActions; a++) {
+        const char* n = libevdev_event_code_get_name(EV_KEY, keys[a]);
+        if (n) fprintf(f, "%s = %s\n", kActionWord[a], n);
+    }
+    fclose(f);
+    logLine(std::string("keys kept in ") + kKeysFile);
+}
+
+// A game's binding screen: each action in turn waits for the next key or
+// button pressed on any device. Esc keeps what it had; a key already doing
+// another action is refused. Keys held when the wait starts count only once
+// let go, so the Enter that started the tool binds nothing.
+static void bindKeys(std::vector<Dev>& devs, int keys[kActions]) {
+    for (int a = 0; a < kActions && !g_stop; a++) {
+        bool down[768] = {};
+        for (const Dev& v : devs) {
+            if (!v.keys) continue;
+            unsigned long held[KEY_MAX / (8 * sizeof(long)) + 1] = {};
+            ioctl(v.fd, EVIOCGKEY(sizeof held), held);
+            for (int c = 0; c < 768; c++) down[c] = down[c] || bit(held, c);
+        }
+        logLine(std::string("press the key or mouse button for ") + kActionName[a] + " (now " + keyName(keys[a]) + ", Esc keeps it)");
+        for (bool done = false; !done && !g_stop;) {
+            std::vector<pollfd> pf;
+            for (const Dev& v : devs) pf.push_back({v.fd, POLLIN, 0});
+            if (poll(pf.data(), pf.size(), 200) < 0 && errno != EINTR) return;
+            for (size_t i = 0; i < devs.size() && !done; i++) {
+                if (!(pf[i].revents & POLLIN) || !devs[i].keys) continue;
+                input_event ev[64];
+                ssize_t n;
+                while (!done && (n = read(devs[i].fd, ev, sizeof ev)) > 0)
+                    for (ssize_t k = 0; k < n / (ssize_t)sizeof(input_event) && !done; k++) {
+                        const input_event& e = ev[k];
+                        if (e.type != EV_KEY || e.code >= 768 || e.value == 2) continue;
+                        const bool was = down[e.code];
+                        down[e.code] = e.value != 0;
+                        if (e.value != 1 || was) continue;
+                        if (e.code == KEY_ESC) { done = true; break; }
+                        int taken = -1;
+                        for (int b = 0; b < kActions; b++) if (b != a && keys[b] == e.code) taken = b;
+                        if (taken >= 0) { logLine(keyName(e.code) + " is already " + kActionName[taken] + ": press another"); continue; }
+                        keys[a] = e.code;
+                        done = true;
+                    }
+            }
+        }
+        logLine(std::string(kActionName[a]) + " = " + keyName(keys[a]));
+    }
+    saveKeys(keys);
+}
+
+int main(int argc, char** argv) {
+    const bool rebind = argc > 1 && !strcmp(argv[1], "--bind");
     g_log = fopen("spike.log", "a");
     if (!g_log) { perror("spike.log"); return 1; }
     fprintf(g_log, "\n");
@@ -207,16 +291,9 @@ int main() {
     logLine("virtual mouse " + ownNode + ": " + accelOf(ownNode));
 
     std::vector<Dev> devs = findDevices();
-    Session s;
-    int keyboards = 0;
-    for (const Dev& v : devs) {
-        if (!v.keyboard) continue;
-        keyboards++;
-        unsigned long held[KEY_MAX / (8 * sizeof(long)) + 1] = {};
-        ioctl(v.fd, EVIOCGKEY(sizeof held), held);
-        for (int k : {kF8, kF9, kF10, kF12}) if (bit(held, k)) s.heldAtStart(k);
-    }
-    if (!keyboards) { logLine("no keyboard with an F8 key can be read: are you in the input group?"); return 1; }
+    int withKeys = 0;
+    for (const Dev& v : devs) withKeys += v.keys;
+    if (!withKeys) { logLine("no keyboard or mouse buttons can be read: are you in the input group?"); return 1; }
 
     termios saved{};
     const bool tty = isatty(0) && tcgetattr(0, &saved) == 0;
@@ -226,12 +303,30 @@ int main() {
     signal(SIGHUP, onSignal);
     Flat flat;
 
+    int keys[kActions];
+    std::copy(kDefaultKey, kDefaultKey + kActions, keys);
+    loadKeys(keys);
+    if (rebind) bindKeys(devs, keys);
+    Session s;
+    std::string list;
+    for (int a = 0; a < kActions; a++) {
+        s.bind((Action)a, keys[a], keyName(keys[a]));
+        list += std::string(a ? ", " : "") + kActionName[a] + " " + keyName(keys[a]);
+    }
+    logLine("keys: " + list + (rebind ? "" : "  (build/spike --bind to change them)"));
+    auto bound = [&](int code) { for (int a = 0; a < kActions; a++) if (keys[a] == code) return true; return false; };
+    for (const Dev& v : devs) {
+        if (!v.keys) continue;
+        unsigned long held[KEY_MAX / (8 * sizeof(long)) + 1] = {};
+        ioctl(v.fd, EVIOCGKEY(sizeof held), held);
+        for (int a = 0; a < kActions; a++) if (bit(held, keys[a])) s.heldAtStart(keys[a]);
+    }
+
     const int timer = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     bool ticking = false;
     int mouse = -1;   // index into devs once the hand has moved one
     bool sayMouse = false;
     logLine("game in focus, crosshair on something sharp. Move the mouse once so it can be picked, then F8.");
-    logLine("F8 hand 360 (three times), F9 slow and fast turn, F10 five turns, F7 flat acceleration and back, F12 quit");
 
     while (!g_stop && !s.quit()) {
         std::vector<pollfd> pf;
@@ -259,22 +354,22 @@ int main() {
                     if (e.type == EV_SYN && e.code == SYN_DROPPED) {
                         s.spoiled("the system dropped events");
                         unsigned long held[KEY_MAX / (8 * sizeof(long)) + 1] = {};
-                        if (devs[i].keyboard && ioctl(devs[i].fd, EVIOCGKEY(sizeof held), held) >= 0)
-                            for (int c : {(int)KEY_F7, (int)kF8, (int)kF9, (int)kF10, (int)kF12}) s.keyState(c, bit(held, c));
+                        if (devs[i].keys && ioctl(devs[i].fd, EVIOCGKEY(sizeof held), held) >= 0)
+                            for (int a = 0; a < kActions; a++) s.keyState(keys[a], bit(held, keys[a]));
                     }
                     if (devs[i].mouse && e.type == EV_REL && e.code == REL_X && e.value) {
                         if (mouse < 0) { mouse = (int)i; sayMouse = true; }
                         if ((int)i == mouse) s.hand(e.value, t);
                     }
-                    if (devs[i].keyboard && e.type == EV_KEY) {
+                    if (devs[i].keys && e.type == EV_KEY) {
                         // Only the check's own keys: the rest are the game's.
-                        if (e.code == KEY_F7) {
+                        if (e.code == keys[kFlat]) {
                             if (e.value == 1 && mouse >= 0) flat.toggle({devs[mouse].node, ownNode});
                             else if (e.value == 1) logLine("move the mouse first, so it can be picked");
                             continue;
                         }
-                        if (e.code != kF8 && e.code != kF9 && e.code != kF10 && e.code != kF12) continue;
-                        if (e.value == 1 && e.code == kF8 && mouse < 0) { logLine("move the mouse first, so it can be picked"); continue; }
+                        if (!bound(e.code)) continue;
+                        if (e.value == 1 && e.code == keys[kHand] && mouse < 0) { logLine("move the mouse first, so it can be picked"); continue; }
                         s.key(e.code, e.value, t);
                     }
                 }
