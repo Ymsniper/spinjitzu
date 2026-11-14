@@ -23,6 +23,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <vector>
+#include "../devices.hpp"
 #include "session.hpp"
 
 using namespace spinjitzu;
@@ -42,80 +43,9 @@ static void logLine(const std::string& s) {
     if (g_log) { fprintf(g_log, "%s.%03ld %s\n", stamp, t.tv_nsec / 1000000, s.c_str()); fflush(g_log); }
 }
 
-static Ns monoNow() {
-    timespec t{};
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (Ns)t.tv_sec * kSecond + t.tv_nsec;
-}
-
-static bool bit(const unsigned long* bits, int n) {
-    return (bits[n / (8 * sizeof(long))] >> (n % (8 * sizeof(long)))) & 1;
-}
-
-struct Dev {
-    int fd = -1;
-    std::string path, name, node;   // node: eventN
-    bool keys = false, mouse = false;   // keys: it has keys or buttons
-    unsigned vendor = 0, product = 0;
-};
-
-// What KDE has set for a device's acceleration, read only.
-static std::string accelOf(const std::string& node) {
-    if (node.empty()) return "unknown";
-    const std::string cmd = "busctl --user get-property org.kde.KWin /org/kde/KWin/InputDevice/" + node +
-                            " org.kde.KWin.InputDevice pointerAcceleration pointerAccelerationProfileFlat"
-                            " pointerAccelerationProfileAdaptive 2>/dev/null";
-    FILE* p = popen(cmd.c_str(), "r");
-    if (!p) return "unknown";
-    std::string out;
-    char b[128];
-    while (fgets(b, sizeof b, p)) { out += b; if (!out.empty() && out.back() == '\n') out.back() = ' '; }
-    pclose(p);
-    // busctl prints "d 0" "b true" "b false": speed, flat, adaptive
-    double speed = 0;
-    char flat[8] = "", adaptive[8] = "";
-    if (sscanf(out.c_str(), "d %lf b %7s b %7s", &speed, flat, adaptive) != 3) return "not reported by KDE";
-    char r[96];
-    snprintf(r, sizeof r, "profile %s, speed %+.2f", !strcmp(flat, "true") ? "flat" : !strcmp(adaptive, "true") ? "adaptive" : "none", speed);
-    return r;
-}
-
-static int makeVirtualMouse(std::string& node) {
-    const int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-    if (fd < 0) return -1;
-    ioctl(fd, UI_SET_EVBIT, EV_REL);
-    ioctl(fd, UI_SET_RELBIT, REL_X);
-    ioctl(fd, UI_SET_RELBIT, REL_Y);
-    // Buttons, or the desktop does not take it for a mouse.
-    ioctl(fd, UI_SET_EVBIT, EV_KEY);
-    ioctl(fd, UI_SET_KEYBIT, BTN_LEFT);
-    ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT);
-    ioctl(fd, UI_SET_KEYBIT, BTN_MIDDLE);
-    uinput_setup u{};
-    u.id.bustype = BUS_USB;
-    u.id.vendor = 0x5a17;
-    u.id.product = 0x0360;
-    snprintf(u.name, sizeof u.name, "%s", kOwnName);
-    if (ioctl(fd, UI_DEV_SETUP, &u) < 0 || ioctl(fd, UI_DEV_CREATE) < 0) { close(fd); return -1; }
-    char sys[64] = "";
-    if (ioctl(fd, UI_GET_SYSNAME(sizeof sys), sys) >= 0) {
-        const std::string dir = std::string("/sys/devices/virtual/input/") + sys;
-        if (DIR* d = opendir(dir.c_str())) {
-            while (dirent* e = readdir(d)) if (!strncmp(e->d_name, "event", 5)) node = e->d_name;
-            closedir(d);
-        }
-    }
-    return fd;
-}
-
-static bool send(int fd, int64_t dx) {
-    if (!dx) return true;
-    input_event ev[2]{};
-    ev[0].type = EV_REL; ev[0].code = REL_X; ev[0].value = (int)dx;
-    ev[1].type = EV_SYN; ev[1].code = SYN_REPORT;
-    if (write(fd, ev, sizeof ev) == (ssize_t)sizeof ev) return true;
-    logLine(std::string("writing to the virtual mouse failed: ") + strerror(errno));
-    return false;
+static std::string accelText(const std::string& node) {
+    const std::string a = accelOf(node);
+    return a.empty() ? "acceleration not reported by KDE" : "profile " + a;
 }
 
 // F7: both mice on the flat acceleration profile, and back. KDE's own
@@ -151,7 +81,7 @@ struct Flat {
         } else {
             restore();
         }
-        for (const std::string& n : nodes) if (!n.empty()) logLine("F7: " + n + " now " + accelOf(n));
+        for (const std::string& n : nodes) if (!n.empty()) logLine("F7: " + n + " now " + accelText(n));
     }
     void restore() {
         if (!on) return;
@@ -161,46 +91,8 @@ struct Flat {
     }
 };
 
-static std::vector<Dev> findDevices() {
-    std::vector<Dev> out;
-    DIR* d = opendir("/dev/input");
-    if (!d) return out;
-    while (dirent* e = readdir(d)) {
-        if (strncmp(e->d_name, "event", 5)) continue;
-        Dev v;
-        v.node = e->d_name;
-        v.path = std::string("/dev/input/") + e->d_name;
-        v.fd = open(v.path.c_str(), O_RDONLY | O_NONBLOCK);
-        if (v.fd < 0) continue;
-        char name[256] = "";
-        ioctl(v.fd, EVIOCGNAME(sizeof name), name);
-        v.name = name;
-        input_id id{};
-        ioctl(v.fd, EVIOCGID, &id);
-        v.vendor = id.vendor;
-        v.product = id.product;
-        unsigned long ev[1] = {}, keys[KEY_MAX / (8 * sizeof(long)) + 1] = {}, rels[1] = {};
-        ioctl(v.fd, EVIOCGBIT(0, sizeof ev), ev);
-        if (bit(ev, EV_KEY)) ioctl(v.fd, EVIOCGBIT(EV_KEY, sizeof keys), keys);
-        if (bit(ev, EV_REL)) ioctl(v.fd, EVIOCGBIT(EV_REL, sizeof rels), rels);
-        v.keys = bit(ev, EV_KEY) && v.name != kOwnName;
-        v.mouse = bit(ev, EV_REL) && bit(rels, REL_X) && v.name != kOwnName;
-        if (!v.keys && !v.mouse) { close(v.fd); continue; }
-        out.push_back(v);
-    }
-    closedir(d);
-    return out;
-}
-
 static void onSignal(int) { g_stop = 1; }
 
-// A key or button as people know it: F8, not KEY_F8.
-static std::string keyName(int code) {
-    const char* n = libevdev_event_code_get_name(EV_KEY, code);
-    if (!n) return "key " + std::to_string(code);
-    const std::string s = n;
-    return s.rfind("KEY_", 0) == 0 ? s.substr(4) : s;
-}
 
 static const char* kKeysFile = "spike.keys";
 
@@ -281,16 +173,16 @@ int main(int argc, char** argv) {
     logLine(std::string("spinjitzu calibration check, session ") + (getenv("XDG_SESSION_TYPE") ? getenv("XDG_SESSION_TYPE") : "unknown"));
 
     std::string ownNode;
-    const int out = makeVirtualMouse(ownNode);
+    const int out = makeVirtualMouse(kOwnName, ownNode);
     if (out < 0) {
         logLine(std::string("cannot make a virtual mouse: ") + strerror(errno) + ". Load the uinput module, or check the uinput group.");
         return 1;
     }
     // The desktop needs a moment to take the new device in before it moves.
     usleep(1000000);
-    logLine("virtual mouse " + ownNode + ": " + accelOf(ownNode));
+    logLine("virtual mouse " + ownNode + ": " + accelText(ownNode));
 
-    std::vector<Dev> devs = findDevices();
+    std::vector<Dev> devs = findDevices(kOwnName);
     int withKeys = 0;
     for (const Dev& v : devs) withKeys += v.keys;
     if (!withKeys) { logLine("no keyboard or mouse buttons can be read: are you in the input group?"); return 1; }
@@ -377,8 +269,10 @@ int main(int argc, char** argv) {
         }
         if (pf.back().revents & POLLIN) {
             uint64_t expirations;
-            if (read(timer, &expirations, sizeof expirations) > 0 && !send(out, s.tick(monoNow())))
+            if (read(timer, &expirations, sizeof expirations) > 0 && !sendX(out, s.tick(monoNow()))) {
+                logLine(std::string("writing to the virtual mouse failed: ") + strerror(errno));
                 s.spoiled("a write to the virtual mouse failed");
+            }
         }
         // Asked of KDE out here, so that the asking never holds up reading
         // the mouse.
@@ -387,7 +281,7 @@ int main(int argc, char** argv) {
             const Dev& m = devs[mouse];
             char b[200];
             snprintf(b, sizeof b, "reading %s (%04x:%04x, %s): ", m.name.c_str(), m.vendor, m.product, m.path.c_str());
-            logLine(b + accelOf(m.node));
+            logLine(b + accelText(m.node));
         }
         for (const std::string& l : s.take()) logLine(l);
         if (s.wantsTicks() != ticking) {
