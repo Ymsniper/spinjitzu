@@ -1,5 +1,5 @@
-// The arithmetic of free 360, with no device in it: calibration, how many
-// counts each turn sends, how they are spread over time, and the free spin.
+// The arithmetic of Spinjitzu, with no device in it: calibration, how many
+// counts each turn sends, how they are spread over time, and the boomerang.
 // Every rule of SPEC.md sections 2 to 6 lives here so that it can be checked
 // offline, on made-up input, before anyone plays. One thread owns these
 // objects (SPEC 7b); none of them locks.
@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include <optional>
 
-namespace f360 {
+namespace spinjitzu {
 
 using Ns = int64_t;   // nanoseconds on the monotonic clock
 inline constexpr Ns kSecond = 1'000'000'000;
@@ -280,7 +280,7 @@ private:
     bool done_ = true;
 };
 
-// ── the free spin (SPEC 6) ──────────────────────────────────────────────────
+// ── the boomerang (SPEC 6) ──────────────────────────────────────────────────
 
 enum class Finish { Forward, Shortest };
 
@@ -388,4 +388,4 @@ private:
     Phase phase_ = Phase::Home;
 };
 
-}  // namespace f360
+}  // namespace spinjitzu

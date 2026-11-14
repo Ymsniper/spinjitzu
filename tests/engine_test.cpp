@@ -7,7 +7,7 @@
 #include <vector>
 #include "../src/engine.hpp"
 
-using namespace f360;
+using namespace spinjitzu;
 
 static int g_bad = 0, g_n = 0;
 static void chk(bool ok, const std::string& what) {
@@ -195,7 +195,7 @@ int main() {
         chk(m.stop() == sent && m.done() && m.step(60 * kTick) == 0, "a turn stopped sends nothing more");
     }
 
-    // ── E4: a free spin comes home ──────────────────────────────────────────
+    // ── E4: a boomerang comes home ──────────────────────────────────────────
     {
         const int64_t cs[] = {200, 997, 16384, 52000};
         int home = 0, tries = 0, gaveUp = 0;
@@ -239,7 +239,7 @@ int main() {
                 }
                 if (s.phase() == Spin::Phase::GaveUp) gaveUp++;
             }
-        printf("     free spins: %d of %d home, %d gave up\n", home, tries, gaveUp);
+        printf("     boomerangs: %d of %d home, %d gave up\n", home, tries, gaveUp);
         chk(exact, "every spin that came home has moved a whole number of Cs, hand included, release between ticks included");
         chk(gaveUp == 0 && home == tries, "with an ordinary hand moving, every spin comes home");
     }

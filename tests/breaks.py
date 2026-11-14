@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-# Breaks src/engine.hpp on purpose, one way at a time, and checks that
-# tests/engine_test.cpp then fails. A check that passes on broken code checks
-# nothing.
+# Breaks the code on purpose, one way at a time, and checks that the checks
+# then fail. A check that passes on broken code checks nothing.
 #
 #   python3 tests/breaks.py
 import os, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+ENGINE = "src/engine.hpp"
+SESSION = "src/spike/session.hpp"
+TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp"]
 
 BREAKS = [
     ("the counter folds whole turns away again",
@@ -60,32 +63,60 @@ BREAKS = [
     ("a half millidegree rounds toward zero",
      "return std::llround(m + (m >= 0 ? 1e-7 : -1e-7));",
      "return (int64_t)m;"),
+    (SESSION, "the slow and the fast turn are never compared",
+     "speedMatters_ = std::fabs((double)(kSlow_ - kFast_)) > tol;",
+     "speedMatters_ = false;"),
+    (SESSION, "the last hand 360 is used, not the median",
+     "c_ = s[s.size() / 2];",
+     "c_ = cs_.back();"),
+    (SESSION, "a held key's repeats press it again",
+     "if (value != 1 || was) return;",
+     "if (value == 0) return;"),
+    (SESSION, "a key held at start acts on its first report",
+     "void heldAtStart(int code) { if (code >= 0 && code < 768) down_[code] = true; }",
+     "void heldAtStart(int code) { (void)code; }"),
+    (SESSION, "the correction is taken the wrong way round",
+     "const auto cv = spinjitzu::corrected(c_, c_, kMean);",
+     "const auto cv = spinjitzu::corrected(c_, c_, -kMean);"),
+    (SESSION, "the five turns use the hand's figure",
+     "Ledger l(cVirtual_);",
+     "Ledger l(c_);"),
+    (SESSION, "a key while the tool turns acts",
+     "if (phase_ == Phase::Sending) { say(\"a key while the tool turns is ignored\"); return; }",
+     ""),
+    (SESSION, "movement during the turn is left out of the correction",
+     "if (phase_ == Phase::Sending) { duringSend_ += dx; correction_ += dx; }",
+     "if (phase_ == Phase::Sending) { duringSend_ += dx; }"),
 ]
+BREAKS = [b if len(b) == 4 else (ENGINE,) + b for b in BREAKS]
 
 
 def main():
-    src = open(os.path.join(ROOT, "src", "engine.hpp")).read()
     caught, missed = 0, []
     with tempfile.TemporaryDirectory() as tmp:
-        os.makedirs(os.path.join(tmp, "src"))
-        os.makedirs(os.path.join(tmp, "tests"))
-        shutil.copy(os.path.join(ROOT, "tests", "engine_test.cpp"), os.path.join(tmp, "tests"))
-        for name, old, new in BREAKS:
+        shutil.copytree(os.path.join(ROOT, "src"), os.path.join(tmp, "src"))
+        shutil.copytree(os.path.join(ROOT, "tests"), os.path.join(tmp, "tests"))
+        for path, name, old, new in BREAKS:
+            src = open(os.path.join(ROOT, path)).read()
             if src.count(old) != 1:
                 print(f"STALE  {name}: the line it breaks is no longer there once")
                 missed.append(name)
                 continue
-            open(os.path.join(tmp, "src", "engine.hpp"), "w").write(src.replace(old, new))
-            exe = os.path.join(tmp, "t")
-            b = subprocess.run(["g++", "-std=c++20", "-O1", "-o", exe, os.path.join(tmp, "tests", "engine_test.cpp")],
-                               capture_output=True, text=True)
-            if b.returncode != 0:
-                print(f"BUILD  {name}: the broken copy does not build\n{b.stderr[:400]}")
-                missed.append(name)
-                continue
-            r = subprocess.run([exe], capture_output=True, text=True, timeout=600)
-            fails = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]
-            if r.returncode != 0 and fails:
+            open(os.path.join(tmp, path), "w").write(src.replace(old, new))
+            fails, built = [], True
+            for t in TESTS:
+                exe = os.path.join(tmp, "t")
+                b = subprocess.run(["g++", "-std=c++20", "-O1", "-o", exe, os.path.join(tmp, t)],
+                                   capture_output=True, text=True)
+                if b.returncode != 0:
+                    print(f"BUILD  {name}: the broken copy does not build\n{b.stderr[:400]}")
+                    built = False
+                    break
+                r = subprocess.run([exe], capture_output=True, text=True, timeout=600)
+                if r.returncode != 0:
+                    fails += [l for l in r.stdout.splitlines() if l.startswith("FAIL")]
+            open(os.path.join(tmp, path), "w").write(src)
+            if built and fails:
                 caught += 1
                 print(f"caught {name}: {fails[0][6:]}")
             else:
