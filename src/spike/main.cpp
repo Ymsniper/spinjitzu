@@ -326,7 +326,7 @@ int main(int argc, char** argv) {
     bool ticking = false;
     int mouse = -1;   // index into devs once the hand has moved one
     bool sayMouse = false;
-    logLine("game in focus, crosshair on something sharp. Move the mouse once so it can be picked, then F8.");
+    logLine("game in focus, crosshair on something sharp. Move the mouse once so it can be picked, then " + keyName(keys[kHand]) + ".");
 
     while (!g_stop && !s.quit()) {
         std::vector<pollfd> pf;
