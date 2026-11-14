@@ -100,8 +100,11 @@ int main() {
         r.g.accel = 0.002;
         r.hand360(0);
         r.fullCheck();
-        chk(r.s.speedMatters() && r.said("Acceleration is in the virtual mouse's path"),
+        chk(r.s.speedMatters() && r.said("Acceleration is in the path"),
             "acceleration on the virtual mouse: the slow and the fast turn land apart, and it says so");
+        r.press(kF10);
+        chk(r.said("F10 means nothing while acceleration is in the path") && !r.s.fiveDone(),
+            "and F10 refuses until the acceleration is gone");
     }
     {
         Rig r;
@@ -175,6 +178,38 @@ int main() {
         q.correct();
         chk(q.said("the hand moved +12 counts while the tool was turning") && q.s.slowOff() == 0,
             "hand movement during the turn is noted, and counted in the correction");
+    }
+    {
+        Rig r;
+        r.hand360(0);
+        r.press(kF9);
+        r.now += kTick; r.s.tick(r.now);
+        r.s.spoiled("events were dropped");
+        r.runSend();
+        r.correct();
+        chk(r.said("gives no figure") && !r.said("slow turn: the hand corrected") && !r.s.cVirtual(),
+            "a turn that lost events gives no figure");
+        Rig q;
+        q.press(kF8);
+        q.hand(5000);
+        q.s.spoiled("events were dropped");
+        q.drain();
+        q.press(kF8);
+        chk(q.said("hand 360 dropped") && q.s.c() == 0, "a hand 360 that lost events is dropped");
+    }
+    {
+        Session s;
+        s.key(kF8, 1, kTick);          // the release of this press is lost in a drop
+        s.keyState(kF8, false);        // the system says it is up
+        s.take();
+        s.key(kF8, 1, 2 * kTick);
+        auto l = s.take();
+        chk(!l.empty() && l[0].find("too small") != std::string::npos, "after a drop the keys are taken as the system has them");
+    }
+    {
+        Rig r;
+        r.hand360(0);
+        chk(r.said("fastest 37 counts in one report"), "each hand 360 says how fast the hand went");
     }
     {
         Session s;

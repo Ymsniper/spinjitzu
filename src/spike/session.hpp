@@ -11,6 +11,8 @@
 //        means acceleration is in the virtual mouse's path.
 //   F10  five full turns in a row, at the corrected figure: any scaling left
 //        shows five times over, the hand's own error only once.
+//   F7   (in main) switches both mice to the flat acceleration profile and
+//        back: the control that tells the game's raw input from acceleration.
 //   F12  quits. Esc is left to the game.
 #pragma once
 
@@ -43,9 +45,27 @@ public:
         press(code, now);
     }
 
+    // What the system reports held, after it dropped events: a press or a
+    // release lost there must not swallow the next press.
+    void keyState(int code, bool held) { if (code >= 0 && code < 768) down_[code] = held; }
+
+    // The system dropped events, or a send failed: the step under way has
+    // lost counts, so it gives no figure.
+    void spoiled(const char* why) {
+        if (phase_ == Phase::Recording) { cal_.cancel(); phase_ = Phase::Idle; say("%s: hand 360 dropped, do it again (F8)", why); return; }
+        if (phase_ == Phase::Sending || phase_ == Phase::Correcting) {
+            void_ = true;
+            say("%s: this turn will give no figure; finish it with F8 and do F9 again", why);
+        }
+    }
+
     // The hand's horizontal counts, from the mouse being read.
     void hand(int64_t dx, Ns now) {
-        (void)now;
+        if (cal_.active() || phase_ == Phase::Sending || phase_ == Phase::Correcting) {
+            if (!moved_) { first_ = now; moved_ = true; }
+            last_ = now;
+            fastest_ = std::max<int64_t>(fastest_, std::llabs(dx));
+        }
         if (cal_.active()) cal_.add(dx);
         if (phase_ == Phase::Sending) { duringSend_ += dx; correction_ += dx; }
         else if (phase_ == Phase::Correcting) correction_ += dx;
@@ -116,6 +136,18 @@ private:
         sentThisTurn_ = 0;
         correction_ = 0;
         duringSend_ = 0;
+        void_ = false;
+        resetPace();
+    }
+
+    // How long the hand took and its fastest report, for telling a spread in
+    // the figures from the speed the hand moved at.
+    void resetPace() { moved_ = false; first_ = last_ = 0; fastest_ = 0; }
+    std::string pace() const {
+        char b[96];
+        if (!moved_) return "the hand did not move";
+        snprintf(b, sizeof b, "over %.2f s, fastest %lld counts in one report", (double)(last_ - first_) / kSecond, (long long)fastest_);
+        return b;
     }
 
     void press(int code, Ns now) {
@@ -129,15 +161,17 @@ private:
                 const auto c = cal_.finish();
                 phase_ = Phase::Idle;
                 if (!c) { say("a hand turn of %lld counts is too small to be a 360: refused", (long long)net); return; }
+                const std::string how = pace();
                 cs_.push_back(*c);
                 std::vector<int64_t> s = cs_;
                 std::sort(s.begin(), s.end());
                 c_ = s[s.size() / 2];
-                say("hand 360 #%zu: %lld counts (net %+lld). Using the median, C = %lld, tolerance %.1f counts.",
-                    cs_.size(), (long long)*c, (long long)net, (long long)c_, tolerance());
+                say("hand 360 #%zu: %lld counts (net %+lld), %s. Using the median, C = %lld, tolerance %.1f counts.",
+                    cs_.size(), (long long)*c, (long long)net, how.c_str(), (long long)c_, tolerance());
                 return;
             }
             cal_.start();
+            resetPace();
             phase_ = Phase::Recording;
             say("recording: turn one full circle by hand back onto the mark, then F8");
             return;
@@ -151,6 +185,7 @@ private:
         }
         if (code == kF10) {
             if (!cVirtual_) { say("F10 needs F9 done first"); return; }
+            if (speedMatters_) { say("F10 means nothing while acceleration is in the path: F7 for flat, then F9 again"); return; }
             Ledger l(cVirtual_);
             const int64_t n = l.begin(5 * kFullTurnMilli);
             say("five turns: %lld counts at C = %lld", (long long)n, (long long)cVirtual_);
@@ -165,6 +200,8 @@ private:
         (void)now;
         phase_ = Phase::Idle;
         const int64_t k = correction_;
+        if (void_) { say("that turn lost counts and gives no figure: F9 again"); return; }
+        say("correction %s", pace().c_str());
         if (duringSend_ != 0)
             say("note: the hand moved %+lld counts while the tool was turning; counted in the correction", (long long)duringSend_);
         if (step_ == Step::Slow) {
@@ -181,7 +218,7 @@ private:
             speedMatters_ = std::fabs((double)(kSlow_ - kFast_)) > tol;
             if (speedMatters_)
                 say("RESULT speed: the slow and the fast turn landed %lld counts apart (tolerance %.1f). "
-                    "Acceleration is in the virtual mouse's path.", (long long)std::llabs(kSlow_ - kFast_), tol);
+                    "Acceleration is in the path, on the desktop or in the game.", (long long)std::llabs(kSlow_ - kFast_), tol);
             else
                 say("RESULT speed: the slow and the fast turn landed the same (%lld apart, tolerance %.1f). "
                     "Acceleration does not touch the virtual mouse.", (long long)std::llabs(kSlow_ - kFast_), tol);
@@ -214,7 +251,9 @@ private:
     std::vector<int64_t> cs_;
     int64_t c_ = 0, cVirtual_ = 0, kSlow_ = 0, kFast_ = 0, fiveOff_ = 0;
     int64_t sentThisTurn_ = 0, correction_ = 0, duringSend_ = 0;
-    bool speedMatters_ = false, fiveDone_ = false, quit_ = false;
+    bool speedMatters_ = false, fiveDone_ = false, quit_ = false, void_ = false, moved_ = false;
+    Ns first_ = 0, last_ = 0;
+    int64_t fastest_ = 0;
     bool down_[768] = {};
     std::deque<std::string> lines_;
 };

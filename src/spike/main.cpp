@@ -104,13 +104,58 @@ static int makeVirtualMouse(std::string& node) {
     return fd;
 }
 
-static void send(int fd, int64_t dx) {
-    if (!dx) return;
+static bool send(int fd, int64_t dx) {
+    if (!dx) return true;
     input_event ev[2]{};
     ev[0].type = EV_REL; ev[0].code = REL_X; ev[0].value = (int)dx;
     ev[1].type = EV_SYN; ev[1].code = SYN_REPORT;
-    if (write(fd, ev, sizeof ev) != (ssize_t)sizeof ev) logLine(std::string("writing to the virtual mouse failed: ") + strerror(errno));
+    if (write(fd, ev, sizeof ev) == (ssize_t)sizeof ev) return true;
+    logLine(std::string("writing to the virtual mouse failed: ") + strerror(errno));
+    return false;
 }
+
+// F7: both mice on the flat acceleration profile, and back. KDE's own
+// settings are changed through KWin, logged, and put back when the check
+// ends, so the control costs the user no trip to the settings.
+struct Flat {
+    struct Saved { std::string node; bool adaptive; };
+    std::vector<Saved> saved;
+    bool on = false;
+
+    static bool get(const std::string& node, const char* prop) {
+        const std::string cmd = "busctl --user get-property org.kde.KWin /org/kde/KWin/InputDevice/" + node +
+                                " org.kde.KWin.InputDevice " + prop + " 2>/dev/null";
+        FILE* p = popen(cmd.c_str(), "r");
+        char b[32] = "";
+        if (p) { if (!fgets(b, sizeof b, p)) b[0] = 0; pclose(p); }
+        return strstr(b, "true") != nullptr;
+    }
+    static void set(const std::string& node, const char* prop) {
+        const std::string cmd = "busctl --user set-property org.kde.KWin /org/kde/KWin/InputDevice/" + node +
+                                " org.kde.KWin.InputDevice " + prop + " b true 2>/dev/null";
+        if (system(cmd.c_str()) != 0) logLine("KDE did not take the change for " + node);
+    }
+    void toggle(const std::vector<std::string>& nodes) {
+        if (!on) {
+            saved.clear();
+            for (const std::string& n : nodes) {
+                if (n.empty()) continue;
+                saved.push_back({n, get(n, "pointerAccelerationProfileAdaptive")});
+                set(n, "pointerAccelerationProfileFlat");
+            }
+            on = true;
+        } else {
+            restore();
+        }
+        for (const std::string& n : nodes) if (!n.empty()) logLine("F7: " + n + " now " + accelOf(n));
+    }
+    void restore() {
+        if (!on) return;
+        for (const Saved& v : saved)
+            set(v.node, v.adaptive ? "pointerAccelerationProfileAdaptive" : "pointerAccelerationProfileFlat");
+        on = false;
+    }
+};
 
 static std::vector<Dev> findDevices() {
     std::vector<Dev> out;
@@ -137,8 +182,6 @@ static std::vector<Dev> findDevices() {
         v.keyboard = bit(ev, EV_KEY) && bit(keys, KEY_F8);
         v.mouse = bit(ev, EV_REL) && bit(rels, REL_X) && v.name != kOwnName;
         if (!v.keyboard && !v.mouse) { close(v.fd); continue; }
-        int clk = CLOCK_MONOTONIC;
-        ioctl(v.fd, EVIOCSCLOCKID, &clk);
         out.push_back(v);
     }
     closedir(d);
@@ -180,11 +223,15 @@ int main() {
     if (tty) { termios t = saved; t.c_lflag &= ~(ECHO | ICANON); tcsetattr(0, TCSANOW, &t); }
     signal(SIGINT, onSignal);
     signal(SIGTERM, onSignal);
+    signal(SIGHUP, onSignal);
+    Flat flat;
 
     const int timer = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     bool ticking = false;
     int mouse = -1;   // index into devs once the hand has moved one
+    bool sayMouse = false;
     logLine("game in focus, crosshair on something sharp. Move the mouse once so it can be picked, then F8.");
+    logLine("F8 hand 360 (three times), F9 slow and fast turn, F10 five turns, F7 flat acceleration and back, F12 quit");
 
     while (!g_stop && !s.quit()) {
         std::vector<pollfd> pf;
@@ -207,18 +254,26 @@ int main() {
             while ((n = read(devs[i].fd, ev, sizeof ev)) > 0) {
                 for (ssize_t k = 0; k < n / (ssize_t)sizeof(input_event); k++) {
                     const input_event& e = ev[k];
-                    const Ns t = (Ns)e.input_event_sec * kSecond + (Ns)e.input_event_usec * 1000;
-                    if (e.type == EV_SYN && e.code == SYN_DROPPED) logLine("events were dropped by the system: redo this step");
+                    // One clock for everything: the turns run on it.
+                    const Ns t = monoNow();
+                    if (e.type == EV_SYN && e.code == SYN_DROPPED) {
+                        s.spoiled("the system dropped events");
+                        unsigned long held[KEY_MAX / (8 * sizeof(long)) + 1] = {};
+                        if (devs[i].keyboard && ioctl(devs[i].fd, EVIOCGKEY(sizeof held), held) >= 0)
+                            for (int c : {(int)KEY_F7, (int)kF8, (int)kF9, (int)kF10, (int)kF12}) s.keyState(c, bit(held, c));
+                    }
                     if (devs[i].mouse && e.type == EV_REL && e.code == REL_X && e.value) {
-                        if (mouse < 0) {
-                            mouse = (int)i;
-                            char b[160];
-                            snprintf(b, sizeof b, "reading %s (%04x:%04x, %s): ", devs[i].name.c_str(), devs[i].vendor, devs[i].product, devs[i].path.c_str());
-                            logLine(b + accelOf(devs[i].node));
-                        }
+                        if (mouse < 0) { mouse = (int)i; sayMouse = true; }
                         if ((int)i == mouse) s.hand(e.value, t);
                     }
                     if (devs[i].keyboard && e.type == EV_KEY) {
+                        // Only the check's own keys: the rest are the game's.
+                        if (e.code == KEY_F7) {
+                            if (e.value == 1 && mouse >= 0) flat.toggle({devs[mouse].node, ownNode});
+                            else if (e.value == 1) logLine("move the mouse first, so it can be picked");
+                            continue;
+                        }
+                        if (e.code != kF8 && e.code != kF9 && e.code != kF10 && e.code != kF12) continue;
                         if (e.value == 1 && e.code == kF8 && mouse < 0) { logLine("move the mouse first, so it can be picked"); continue; }
                         s.key(e.code, e.value, t);
                     }
@@ -227,7 +282,17 @@ int main() {
         }
         if (pf.back().revents & POLLIN) {
             uint64_t expirations;
-            if (read(timer, &expirations, sizeof expirations) > 0) send(out, s.tick(monoNow()));
+            if (read(timer, &expirations, sizeof expirations) > 0 && !send(out, s.tick(monoNow())))
+                s.spoiled("a write to the virtual mouse failed");
+        }
+        // Asked of KDE out here, so that the asking never holds up reading
+        // the mouse.
+        if (sayMouse) {
+            sayMouse = false;
+            const Dev& m = devs[mouse];
+            char b[200];
+            snprintf(b, sizeof b, "reading %s (%04x:%04x, %s): ", m.name.c_str(), m.vendor, m.product, m.path.c_str());
+            logLine(b + accelOf(m.node));
         }
         for (const std::string& l : s.take()) logLine(l);
         if (s.wantsTicks() != ticking) {
@@ -239,6 +304,10 @@ int main() {
     }
 
     for (const std::string& l : s.take()) logLine(l);
+    if (flat.on) {
+        flat.restore();
+        logLine("acceleration settings put back as they were");
+    }
     if (tty) { tcflush(0, TCIFLUSH); tcsetattr(0, TCSANOW, &saved); }
     ioctl(out, UI_DEV_DESTROY);
     close(out);
