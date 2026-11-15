@@ -9,7 +9,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 ENGINE = "src/engine.hpp"
 SESSION = "src/spike/session.hpp"
-TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp"]
+CORE = "src/core.hpp"
+SETTINGS = "src/settings.hpp"
+TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp"]
+EVDEV = subprocess.run(["pkg-config", "--cflags", "--libs", "libevdev"], capture_output=True, text=True).stdout.split()
 
 BREAKS = [
     ("the counter folds whole turns away again",
@@ -96,6 +99,33 @@ BREAKS = [
     (SESSION, "the hand 360 stays on F8 whatever is bound",
      "if (code == keys_[kHand]) {",
      "if (code == kF8) {"),
+    (CORE, "Esc binds itself instead of cancelling",
+     "out_.captured = code == KEY_ESC ? 0 : code;",
+     "out_.captured = code;"),
+    (CORE, "turn keys work when not armed",
+     "if (!armed_ || phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;",
+     "if (phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;"),
+    (CORE, "a press during a turn starts another",
+     "if (!armed_ || phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;",
+     "if (!armed_ || s_.cVirtual < kLeastCalibration) return;"),
+    (CORE, "waiting for a key does not hold the binds off",
+     "if (capturing_ >= 0) {",
+     "if (false) {"),
+    (CORE, "a boomerang whose key device went away spins on",
+     "if (phase_ == Phase::Spinning && !spin_.done()) { spin_.stop();",
+     "if (false) { spin_.stop();"),
+    (CORE, "the hand's movement is left out of the boomerang",
+     "else if (phase_ == Phase::Spinning) spin_.hand(scaler_(dx));",
+     ""),
+    (CORE, "a new hand figure leaves the virtual mouse's alone",
+     "            s_.cVirtual = s_.cHand;\n",
+     ""),
+    (SETTINGS, "numbers in the file are never read",
+     "return r.ec == std::errc() && r.ptr == s.data() + s.size() && std::isfinite(v);",
+     "return false;"),
+    (SETTINGS, "jitter read from the file is not held to range",
+     "else if (k == \"jitter\") { if (numIn(v, d)) s.jitter = jitterIn(d); }",
+     "else if (k == \"jitter\") { if (numIn(v, d)) s.jitter = d; }"),
 ]
 BREAKS = [b if len(b) == 4 else (ENGINE,) + b for b in BREAKS]
 
@@ -115,7 +145,7 @@ def main():
             fails, built = [], True
             for t in TESTS:
                 exe = os.path.join(tmp, "t")
-                b = subprocess.run(["g++", "-std=c++20", "-O1", "-o", exe, os.path.join(tmp, t)],
+                b = subprocess.run(["g++", "-std=c++20", "-O1", "-o", exe, os.path.join(tmp, t)] + EVDEV,
                                    capture_output=True, text=True)
                 if b.returncode != 0:
                     print(f"BUILD  {name}: the broken copy does not build\n{b.stderr[:400]}")
