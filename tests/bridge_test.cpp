@@ -31,7 +31,6 @@ int main() {
             const Bridge::Orders o = b.take();
             if (o.quit) break;
             if (o.settingsNew) core.use(o.settings);
-            if (o.armedNew) core.arm(o.armed);
             now += kTick;
             if (o.captureNew) { core.capture(o.capture, now); now += kTick; core.key(KEY_A + answered % 20, 1, now); now += kTick; core.key(KEY_A + answered % 20, 0, now); answered++; }
             core.tick(now);
@@ -46,10 +45,10 @@ int main() {
     for (int frame = 0; got < kAsks && frame < 10'000'000; frame++) {
         s.speed = 30 + frame % 1000;
         b.settings(s);
-        b.arm(frame % 2);
+        s.armed = frame % 2;
         if (waiting < 0 && asked < kAsks) { waiting = asked % 7; b.capture(waiting); asked++; }
         const Shown sh = b.look();
-        for (const std::string& l : sh.core.log) logs += l.rfind("bound ", 0) == 0;
+        for (const std::string& l : sh.core.log) logs += l.rfind("pressed ", 0) == 0;
         if (sh.core.captureSlot >= 0) {
             slotsRight = slotsRight && sh.core.captureSlot == waiting && sh.core.captured > 0;
             got++;

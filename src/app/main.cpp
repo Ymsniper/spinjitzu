@@ -76,7 +76,6 @@ static void worker(Bridge& b) {
             core.use(o.settings);
             if (o.settings.mouse != wantMouse) { mouseNode.clear(); wantMouse = o.settings.mouse; hand = wantMouse; b.tellDevices(hand, problem, "", node); }
         }
-        if (o.armedNew) core.arm(o.armed);
         if (o.captureNew) core.capture(o.capture, monoNow());
 
         std::vector<pollfd> pf;
@@ -195,7 +194,7 @@ static bool sliderTyped(const char* id, const char* label, double* v, double lo,
     if (changed) *v = f;
     ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
-    if (ImGui::InputDouble("##t", v, 0, 0, "%.3g")) changed = true;
+    if (ImGui::InputDouble("##t", v, 0, 0, fmt)) changed = true;
     *v = std::isfinite(*v) ? std::clamp(*v, lo, hi) : lo;
     ImGui::SameLine();
     ImGui::TextUnformatted(label);
@@ -208,7 +207,7 @@ struct Ui {
     Bridge& b;
     Settings s;
     std::string path;
-    bool armed = false, dirty = false;
+    bool dirty = false;
     double changedAt = 0;
     int capturing = -1;
     std::string accel;            // what KDE said, when asked
@@ -251,8 +250,8 @@ struct Ui {
                 int clash = -1;
                 for (int other = 0; other < kSlotTurn0 + (int)s.turns.size(); other++)
                     if (other != slot && slotKey(other) && *slotKey(other) == code) clash = other;
-                if (clash >= 0) log.push_back(keyName(code) + " is already the " + slotName(clash) + " key");
-                else if (int* k = slotKey(slot)) { *k = code; changed(); }
+                if (clash >= 0) log.push_back(keyName(code) + " is already the " + slotName(clash) + " key: not bound");
+                else if (int* k = slotKey(slot)) { *k = code; changed(); log.push_back("bound " + keyName(code) + " to " + slotName(slot)); }
             }
         }
         if (sh.core.newC) { s.cHand = sh.core.cHand; s.cVirtual = sh.core.cVirtual; s.checked = sh.core.checked; changed(); }
@@ -270,7 +269,7 @@ struct Ui {
             else ImGui::TextColored(kWarn, "not checked: test 360 in Calibrate");
         }
         ImGui::SameLine(ImGui::GetWindowWidth() - 140);
-        if (ImGui::Checkbox("Armed", &armed)) b.arm(armed);
+        if (ImGui::Checkbox("Armed", &s.armed)) changed();
         if (!sh.problem.empty()) ImGui::TextColored(kBad, "%s", sh.problem.c_str());
         ImGui::TextDisabled("%s", sh.core.doing.c_str());
         ImGui::Separator();

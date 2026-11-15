@@ -37,6 +37,7 @@ struct Settings {
     int keyCalibrate = KEY_F8, keyTest = KEY_F9, keyPanic = KEY_PAUSE;
     int64_t cHand = 0, cVirtual = 0;
     bool checked = false;         // a test 360 through the virtual mouse landed on the mark
+    bool armed = false;           // turn and boomerang keys work
     double speed = 720;
     Curve curve = Curve::Smooth;
     double jitter = 0;
@@ -68,6 +69,7 @@ inline std::string toText(const Settings& s) {
     o += "c_hand = " + std::to_string(s.cHand) + "\n";
     o += "c_virtual = " + std::to_string(s.cVirtual) + "\n";
     o += std::string("checked = ") + (s.checked ? "1" : "0") + "\n";
+    o += std::string("armed = ") + (s.armed ? "1" : "0") + "\n";
     o += "speed = " + num(s.speed) + "\n";
     o += std::string("curve = ") + curve(s.curve) + "\n";
     o += "jitter = " + num(s.jitter) + "\n";
@@ -117,6 +119,7 @@ inline Settings fromText(const std::string& text) {
         else if (k == "c_hand") c(v, s.cHand);
         else if (k == "c_virtual") c(v, s.cVirtual);
         else if (k == "checked") s.checked = v == "1";
+        else if (k == "armed") s.armed = v == "1";
         else if (k == "speed") { if (numIn(v, d)) s.speed = speedIn(d); }
         else if (k == "curve") s.curve = v == "constant" ? Curve::Constant : Curve::Smooth;
         else if (k == "jitter") { if (numIn(v, d)) s.jitter = jitterIn(d); }

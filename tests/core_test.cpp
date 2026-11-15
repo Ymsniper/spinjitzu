@@ -83,7 +83,7 @@ int main() {
         back.dir = -1;
         r.s.turns.push_back(back);
         r.c.use(r.s);
-        r.c.arm(true);
+        r.s.armed = true; r.c.use(r.s);
     };
     {
         Rig r;
@@ -97,9 +97,27 @@ int main() {
     {
         Rig r;
         armed(r);
-        r.c.arm(false);
+        r.s.armed = false; r.c.use(r.s);
         r.press(KEY_E); r.run();
         chk(r.sent == 0, "not armed: a turn key does nothing");
+    }
+    {
+        Rig r;
+        armed(r);
+        r.s.armed = false; r.c.use(r.s);
+        r.press(KEY_E);
+        r.press(KEY_Z);
+        chk(r.said("E pressed, but not armed") && !r.said("Z pressed"), "a turn key pressed while not armed says why nothing happened; an unbound key says nothing");
+    }
+    {
+        Rig r;
+        r.c.capture(kSlotTurn0, r.now);
+        r.now += kTick; r.c.key(BTN_LEFT, 1, r.now);
+        Core::Out o = r.c.take();
+        r.now += kTick; r.c.key(BTN_LEFT, 0, r.now);
+        r.now += kTick; r.c.key(KEY_K, 1, r.now);
+        Core::Out p = r.c.take();
+        chk(o.captureSlot < 0 && p.captureSlot == kSlotTurn0 && p.captured == KEY_K, "left click cannot be bound; the next key is");
     }
     {
         Rig r;
@@ -160,7 +178,7 @@ int main() {
         r.s.boom.key = KEY_R;
         r.s.boom.speed = 1440;
         r.c.use(r.s);
-        r.c.arm(true);
+        r.s.armed = true; r.c.use(r.s);
         r.now += kTick; r.c.key(KEY_R, 1, r.now);
         for (int i = 0; i < 700; i++) {
             r.now += kTick;
@@ -184,7 +202,7 @@ int main() {
         r.calibrate(16000);
         r.s.boom.key = KEY_R;
         r.c.use(r.s);
-        r.c.arm(true);
+        r.s.armed = true; r.c.use(r.s);
         r.now += kTick; r.c.key(KEY_R, 1, r.now);
         for (int i = 0; i < 100; i++) { r.now += kTick; r.c.tick(r.now); }
         r.c.keyDeviceGone();

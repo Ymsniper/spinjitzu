@@ -21,7 +21,6 @@ class Bridge {
 public:
     // window side
     void settings(const Settings& s) { std::lock_guard<std::mutex> l(m_); settings_ = s; settingsNew_ = true; }
-    void arm(bool on) { std::lock_guard<std::mutex> l(m_); armed_ = on; armedNew_ = true; }
     void capture(int slot) { std::lock_guard<std::mutex> l(m_); capture_ = slot; captureNew_ = true; }
     void quit() { std::lock_guard<std::mutex> l(m_); quit_ = true; }
     // What the worker said since the last look: the log and the one-off
@@ -36,18 +35,16 @@ public:
     }
 
     // worker side
-    struct Orders { bool settingsNew = false, armedNew = false, captureNew = false, quit = false; Settings settings; bool armed = false; int capture = -1; };
+    struct Orders { bool settingsNew = false, captureNew = false, quit = false; Settings settings; int capture = -1; };
     Orders take() {
         std::lock_guard<std::mutex> l(m_);
         Orders o;
         o.settingsNew = settingsNew_;
         if (settingsNew_) o.settings = settings_;
-        o.armedNew = armedNew_;
-        o.armed = armed_;
         o.captureNew = captureNew_;
         o.capture = capture_;
         o.quit = quit_;
-        settingsNew_ = armedNew_ = captureNew_ = false;
+        settingsNew_ = captureNew_ = false;
         return o;
     }
     void tell(const Core::Out& out) {
@@ -76,7 +73,7 @@ public:
 private:
     std::mutex m_;
     Settings settings_;
-    bool settingsNew_ = false, armed_ = false, armedNew_ = false, captureNew_ = false, quit_ = false;
+    bool settingsNew_ = false, captureNew_ = false, quit_ = false;
     int capture_ = -1;
     Shown shown_;
 };

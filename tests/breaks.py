@@ -103,11 +103,11 @@ BREAKS = [
      "out_.captured = code == KEY_ESC ? 0 : code;",
      "out_.captured = code;"),
     (CORE, "turn keys work when not armed",
-     "if (!armed_ || phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;",
-     "if (phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;"),
+     "if (!armed_) { say(keyName(code) + \" pressed, but not armed: tick Armed at the top right\"); return; }",
+     ""),
     (CORE, "a press during a turn starts another",
-     "if (!armed_ || phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;",
-     "if (!armed_ || s_.cVirtual < kLeastCalibration) return;"),
+     "if (phase_ != Phase::Idle) return;\n        if (code == s_.boom.key)",
+     "if (code == s_.boom.key)"),
     (CORE, "waiting for a key does not hold the binds off",
      "if (capturing_ >= 0) {",
      "if (false) {"),
@@ -126,6 +126,12 @@ BREAKS = [
     (SETTINGS, "jitter read from the file is not held to range",
      "else if (k == \"jitter\") { if (numIn(v, d)) s.jitter = jitterIn(d); }",
      "else if (k == \"jitter\") { if (numIn(v, d)) s.jitter = d; }"),
+    (CORE, "left click can be bound",
+     "if (code == BTN_LEFT) { say(\"left click cannot be bound: press another\"); return; }",
+     ""),
+    (CORE, "a turn key while not armed says nothing",
+     "if (!armed_) { say(keyName(code) + \" pressed, but not armed: tick Armed at the top right\"); return; }",
+     "if (!armed_) return;"),
 ]
 BREAKS = [b if len(b) == 4 else (ENGINE,) + b for b in BREAKS]
 

@@ -39,10 +39,9 @@ public:
     void use(const Settings& s) {
         const bool newLedger = s.cVirtual != s_.cVirtual;
         s_ = s;
+        armed_ = s.armed;
         if (newLedger) ledger_ = Ledger(std::max<int64_t>(s_.cVirtual, kLeastCalibration));
     }
-    void arm(bool on) { armed_ = on; }
-    bool armed() const { return armed_; }
 
     // The next key or button pressed binds `slot`. Keys held now count only
     // once let go: the click that asked for it binds nothing.
@@ -64,16 +63,22 @@ public:
         if (was) return;
         if (capturing_ >= 0) {
             if (t < captureFrom_) return;
+            // Left click fires in every game, and it is how the window is clicked.
+            if (code == BTN_LEFT) { say("left click cannot be bound: press another"); return; }
             out_.captureSlot = capturing_;
             out_.captured = code == KEY_ESC ? 0 : code;
             capturing_ = -1;
-            say(code == KEY_ESC ? "binding cancelled" : "bound " + keyName(code));
+            say(code == KEY_ESC ? "binding cancelled" : "pressed " + keyName(code));
             return;
         }
         if (code == s_.keyPanic) { panic(); return; }
         if (code == s_.keyCalibrate) { calibrateKey(); return; }
         if (code == s_.keyTest) { testKey(t); return; }
-        if (!armed_ || phase_ != Phase::Idle || s_.cVirtual < kLeastCalibration) return;
+        const bool bound = code == s_.boom.key || std::any_of(s_.turns.begin(), s_.turns.end(), [&](const TurnBind& tb) { return tb.key == code; });
+        if (!bound) return;
+        if (!armed_) { say(keyName(code) + " pressed, but not armed: tick Armed at the top right"); return; }
+        if (s_.cVirtual < kLeastCalibration) { say(keyName(code) + " pressed, but not calibrated yet"); return; }
+        if (phase_ != Phase::Idle) return;
         if (code == s_.boom.key) { startSpin(code, t); return; }
         for (const TurnBind& tb : s_.turns)
             if (tb.key == code) { startTurn(tb, t); return; }
