@@ -113,9 +113,10 @@ boomerang the hand's counts are added to the net (section 6).
 
 ## 7b. Who runs what
 
-- One thread, the tick thread, owns every engine object. Input arrives on
-  other threads as timestamped events through a single-producer queue; the
-  tick thread applies them, then steps the engine, then sends.
+- One worker thread owns the devices and every engine object: it reads the
+  devices, steps the engine on a 1 ms timer while something turns, and
+  sends. The window is another thread; it hands over settings and commands
+  and reads what the worker says, through one lock held only to copy.
 - Input is checked where it enters: degrees beyond 1000 turns or not a
   number are refused, speed and jitter are held to their ranges, a `C` under
   the calibration floor is refused.
