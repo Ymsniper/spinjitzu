@@ -39,7 +39,7 @@ add_executable(spike src/spike/main.cpp)
 target_include_directories(spike PRIVATE ${EVDEV_INCLUDE_DIRS})
 target_link_libraries(spike ${EVDEV_LIBRARIES})
 
-foreach(t engine_test spike_test core_test bridge_test)
+foreach(t engine_test spike_test core_test bridge_test theme_test)
     add_executable(${t} tests/${t}.cpp)
     target_include_directories(${t} PRIVATE ${EVDEV_INCLUDE_DIRS})
     target_link_libraries(${t} ${EVDEV_LIBRARIES} Threads::Threads)

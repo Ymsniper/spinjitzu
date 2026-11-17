@@ -11,7 +11,8 @@ ENGINE = "src/engine.hpp"
 SESSION = "src/spike/session.hpp"
 CORE = "src/core.hpp"
 SETTINGS = "src/settings.hpp"
-TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp"]
+THEME = "src/app/theme.hpp"
+TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp", "tests/theme_test.cpp"]
 EVDEV = subprocess.run(["pkg-config", "--cflags", "--libs", "libevdev"], capture_output=True, text=True).stdout.split()
 
 BREAKS = [
@@ -132,6 +133,9 @@ BREAKS = [
     (CORE, "a turn key while not armed says nothing",
      "if (!armed_) { say(keyName(code) + \" pressed, but not armed: tick Armed at the top right\"); return; }",
      "if (!armed_) return;"),
+    (THEME, "the ink fades to a grey nobody can read",
+     "constexpr Rgb kSumi{0x2A, 0x21, 0x19};",
+     "constexpr Rgb kSumi{0x8A, 0x81, 0x79};"),
 ]
 BREAKS = [b if len(b) == 4 else (ENGINE,) + b for b in BREAKS]
 

@@ -17,6 +17,7 @@
 #include "../bridge.hpp"
 #include "../devices.hpp"
 #include "../settings.hpp"
+#include "theme.hpp"
 
 using namespace spinjitzu;
 
@@ -145,44 +146,61 @@ static void worker(Bridge& b) {
 
 // ── the window ────────────────────────────────────────────────────────────────
 
-// One accent, #7cffa8 on near black, as in umbra's menu.
-static const ImVec4 kAccent(0.486f, 1.000f, 0.659f, 1.0f);
-static const ImVec4 kWarn(1.0f, 0.75f, 0.30f, 1.0f);
-static const ImVec4 kBad(1.0f, 0.42f, 0.42f, 1.0f);
-static ImVec4 accent(float a) { return ImVec4(kAccent.x, kAccent.y, kAccent.z, a); }
+// Ink on paper (theme.hpp). Every control is drawn with an ink border, so
+// none of them can go unseen again, as Armed once did.
+static ImVec4 col(theme::Rgb c, float a = 1.0f) { return ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, a); }
+static const ImVec4 kInk = col(theme::kSumi);
+static const ImVec4 kFadedInk = col(theme::kFaded);
+static const ImVec4 kSeal = col(theme::kShu);
+static const ImVec4 kIndigo = col(theme::kAi);
 
 static void applyTheme() {
+    using namespace theme;
     ImGuiStyle& st = ImGui::GetStyle();
-    st.FrameRounding = 4;
-    st.GrabRounding = 4;
-    st.TabRounding = 4;
-    st.WindowPadding = ImVec2(14, 12);
-    st.ItemSpacing = ImVec2(8, 7);
+    st.WindowPadding = ImVec2(18, 14);
+    st.FramePadding = ImVec2(8, 4);
+    st.ItemSpacing = ImVec2(10, 8);
+    st.FrameRounding = 3;
+    st.GrabRounding = 2;
+    st.TabRounding = 0;
+    st.WindowBorderSize = 0;
+    st.FrameBorderSize = 1;
+    st.TabBorderSize = 0;
+    st.GrabMinSize = 12;
     ImVec4* c = st.Colors;
-    c[ImGuiCol_Text] = ImVec4(0.812f, 0.910f, 0.863f, 1.00f);
-    c[ImGuiCol_TextDisabled] = ImVec4(0.435f, 0.502f, 0.475f, 1.00f);
-    c[ImGuiCol_WindowBg] = ImVec4(0.016f, 0.027f, 0.039f, 1.00f);
-    c[ImGuiCol_PopupBg] = ImVec4(0.027f, 0.043f, 0.051f, 0.97f);
-    c[ImGuiCol_Border] = accent(0.20f);
-    c[ImGuiCol_FrameBg] = accent(0.07f);
-    c[ImGuiCol_FrameBgHovered] = accent(0.15f);
-    c[ImGuiCol_FrameBgActive] = accent(0.24f);
-    c[ImGuiCol_CheckMark] = kAccent;
-    c[ImGuiCol_SliderGrab] = accent(0.62f);
-    c[ImGuiCol_SliderGrabActive] = kAccent;
-    c[ImGuiCol_Button] = accent(0.10f);
-    c[ImGuiCol_ButtonHovered] = accent(0.24f);
-    c[ImGuiCol_ButtonActive] = accent(0.38f);
-    c[ImGuiCol_Header] = accent(0.12f);
-    c[ImGuiCol_HeaderHovered] = accent(0.24f);
-    c[ImGuiCol_HeaderActive] = accent(0.36f);
-    c[ImGuiCol_Separator] = accent(0.22f);
-    c[ImGuiCol_Tab] = accent(0.06f);
-    c[ImGuiCol_TabHovered] = accent(0.28f);
-    c[ImGuiCol_TabSelected] = accent(0.18f);
-    c[ImGuiCol_TabSelectedOverline] = kAccent;
-    c[ImGuiCol_TextSelectedBg] = accent(0.30f);
-    c[ImGuiCol_NavCursor] = kAccent;
+    c[ImGuiCol_Text] = kInk;
+    c[ImGuiCol_TextDisabled] = kFadedInk;
+    c[ImGuiCol_WindowBg] = col(kWashi);
+    c[ImGuiCol_ChildBg] = col(kWashi, 0);
+    c[ImGuiCol_PopupBg] = col(kWashi);
+    c[ImGuiCol_Border] = col(kSumi, 0.8f);
+    c[ImGuiCol_BorderShadow] = col(kSumi, 0);
+    c[ImGuiCol_FrameBg] = col(kWell);
+    c[ImGuiCol_FrameBgHovered] = col(mix(kSumi, kWell, 0.08));
+    c[ImGuiCol_FrameBgActive] = col(mix(kSumi, kWell, 0.12));
+    c[ImGuiCol_CheckMark] = kInk;
+    c[ImGuiCol_SliderGrab] = kInk;
+    c[ImGuiCol_SliderGrabActive] = kIndigo;
+    c[ImGuiCol_Button] = col(kWashi);
+    c[ImGuiCol_ButtonHovered] = col(kWell);
+    c[ImGuiCol_ButtonActive] = col(mix(kSumi, kWell, 0.12));
+    c[ImGuiCol_Header] = col(kWell);
+    c[ImGuiCol_HeaderHovered] = col(mix(kSumi, kWell, 0.08));
+    c[ImGuiCol_HeaderActive] = col(mix(kSumi, kWell, 0.12));
+    c[ImGuiCol_Separator] = col(kSumi, 0.45f);
+    c[ImGuiCol_Tab] = col(kWashi, 0);
+    c[ImGuiCol_TabHovered] = col(kWell);
+    c[ImGuiCol_TabSelected] = col(kWell);
+    c[ImGuiCol_TabSelectedOverline] = kSeal;
+    c[ImGuiCol_TabDimmed] = col(kWashi, 0);
+    c[ImGuiCol_TabDimmedSelected] = col(kWashi, 0);
+    c[ImGuiCol_TabDimmedSelectedOverline] = kSeal;
+    c[ImGuiCol_ScrollbarBg] = col(kWashi, 0);
+    c[ImGuiCol_ScrollbarGrab] = col(kSumi, 0.35f);
+    c[ImGuiCol_ScrollbarGrabHovered] = col(kSumi, 0.5f);
+    c[ImGuiCol_ScrollbarGrabActive] = col(kSumi, 0.65f);
+    c[ImGuiCol_TextSelectedBg] = col(kAi, 0.25f);
+    c[ImGuiCol_NavCursor] = kIndigo;
 }
 
 // A slider with a box beside it to type the same number into.
@@ -212,6 +230,7 @@ struct Ui {
     int capturing = -1;
     std::string accel;            // what KDE said, when asked
     std::vector<std::string> log;
+    int forceTab = -1;            // --shot: the tab to draw
 
     int* slotKey(int slot) {
         if (slot == kSlotCalibrate) return &s.keyCalibrate;
@@ -259,18 +278,18 @@ struct Ui {
     }
 
     void header(const Shown& sh) {
-        ImGui::TextColored(kAccent, "SPINJITZU");
+        ImGui::TextColored(kIndigo, "SPINJITZU");
         ImGui::SameLine();
-        if (!s.cHand) ImGui::TextColored(kWarn, "| not calibrated");
+        if (!s.cHand) ImGui::TextColored(kSeal, "| not calibrated");
         else {
             ImGui::TextDisabled("| %lld counts a turn by hand, %lld virtual", (long long)s.cHand, (long long)s.cVirtual);
             ImGui::SameLine();
-            if (s.checked) ImGui::TextColored(kAccent, "checked");
-            else ImGui::TextColored(kWarn, "not checked: test 360 in Calibrate");
+            if (s.checked) ImGui::TextColored(kIndigo, "checked");
+            else ImGui::TextColored(kSeal, "not checked: test 360 in Calibrate");
         }
         ImGui::SameLine(ImGui::GetWindowWidth() - 140);
         if (ImGui::Checkbox("Armed", &s.armed)) changed();
-        if (!sh.problem.empty()) ImGui::TextColored(kBad, "%s", sh.problem.c_str());
+        if (!sh.problem.empty()) ImGui::TextColored(kSeal, "%s", sh.problem.c_str());
         ImGui::TextDisabled("%s", sh.core.doing.c_str());
         ImGui::Separator();
     }
@@ -288,7 +307,7 @@ struct Ui {
         ImGui::Text("Test 360 key");  ImGui::SameLine(160); bindButton(kSlotTest);
         ImGui::Spacing();
         if (sh.core.calibrating || sh.core.correcting)
-            ImGui::TextColored(kAccent, "%lld counts", (long long)sh.core.calNet);
+            ImGui::TextColored(kIndigo, "%lld counts", (long long)sh.core.calNet);
         ImGui::Separator();
         ImGui::BeginChild("log", ImVec2(0, 0));
         for (const std::string& l : log) ImGui::TextUnformatted(l.c_str());
@@ -309,7 +328,7 @@ struct Ui {
     }
 
     void turnsTab() {
-        if (!s.cHand) ImGui::TextColored(kWarn, "Calibrate first: turns need to know how far a full turn is.");
+        if (!s.cHand) ImGui::TextColored(kSeal, "Calibrate first: turns need to know how far a full turn is.");
         int remove = -1;
         for (size_t i = 0; i < s.turns.size(); i++) {
             TurnBind& t = s.turns[i];
@@ -370,8 +389,8 @@ struct Ui {
         if (!l.any) { ImGui::TextDisabled("no turn yet"); return; }
         ImGui::Text("last turn: %.3f degrees, %lld counts", (double)l.milli / kMilli, (long long)l.counts);
         ImGui::SameLine();
-        if (l.stopped) ImGui::TextColored(kWarn, "stopped: %lld of %lld sent", (long long)l.sent, (long long)l.counts);
-        else if (l.sent == l.counts) ImGui::TextColored(kAccent, "all sent");
+        if (l.stopped) ImGui::TextColored(kSeal, "stopped: %lld of %lld sent", (long long)l.sent, (long long)l.counts);
+        else if (l.sent == l.counts) ImGui::TextColored(kIndigo, "all sent");
         else ImGui::TextDisabled("%lld sent so far", (long long)l.sent);
     }
 
@@ -384,34 +403,40 @@ struct Ui {
                                            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
         header(sh);
         ImGui::BeginChild("tabs", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 6));
+        auto tab = [&](int i) { return forceTab == i ? ImGuiTabItemFlags_SetSelected : 0; };
         if (ImGui::BeginTabBar("tabs")) {
-            if (ImGui::BeginTabItem("Calibrate")) { calibrateTab(sh); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Turns")) { turnsTab(); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Boomerang")) { boomerangTab(); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Motion")) {
+            if (ImGui::BeginTabItem("Calibrate", nullptr, tab(0))) { calibrateTab(sh); ImGui::EndTabItem(); }
+            if (ImGui::BeginTabItem("Turns", nullptr, tab(1))) { turnsTab(); ImGui::EndTabItem(); }
+            if (ImGui::BeginTabItem("Boomerang", nullptr, tab(2))) { boomerangTab(); ImGui::EndTabItem(); }
+            if (ImGui::BeginTabItem("Motion", nullptr, tab(3))) {
                 ImGui::TextDisabled("For every turn without its own.");
                 motionRow("defaults", &s.speed, &s.curve, &s.jitter);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Output")) { outputTab(sh); ImGui::EndTabItem(); }
+            if (ImGui::BeginTabItem("Output", nullptr, tab(4))) { outputTab(sh); ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         ImGui::EndChild();
         footer(sh);
         ImGui::End();
         // Written once the changes stop, not on every step of a slider.
-        if (dirty && GetTime() - changedAt > 0.5) { saveSettings(path, s); dirty = false; }
+        if (dirty && !path.empty() && GetTime() - changedAt > 0.5) { saveSettings(path, s); dirty = false; }
     }
 };
 
-int main() {
+int main(int argc, char** argv) {
+    // spinjitzu --shot out.png [tab] : the window drawn off screen into a
+    // picture, to look at without a desktop session in the way. No device is
+    // opened and the settings file is only read.
+    const bool shot = argc >= 3 && !strcmp(argv[1], "--shot");
     const std::string path = settingsPath();
     Bridge b;
-    Ui ui(b, loadSettings(path), path);
+    Ui ui(b, loadSettings(path), shot ? "" : path);
     b.settings(ui.s);
-    std::thread w(worker, std::ref(b));
+    std::thread w;
+    if (!shot) w = std::thread(worker, std::ref(b));
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | (shot ? FLAG_WINDOW_HIDDEN : 0));
     SetTraceLogLevel(LOG_WARNING);
     InitWindow(820, 640, "Spinjitzu");
     SetTargetFPS(60);
@@ -419,14 +444,37 @@ int main() {
     ImGui::GetIO().IniFilename = nullptr;
     applyTheme();
 
+    auto draw = [&] {
+        ClearBackground(Color{theme::kTable.r, theme::kTable.g, theme::kTable.b, 255});
+        rlImGuiBegin();
+        ui.frame();
+        rlImGuiEnd();
+    };
+    if (shot) {
+        ui.forceTab = argc > 3 ? atoi(argv[3]) : 0;
+        // A hidden window's own picture is undefined: draw into a texture.
+        const RenderTexture2D rt = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+        for (int i = 0; i < 4; i++) {   // ImGui lays a window out over its first frames
+            BeginDrawing();
+            BeginTextureMode(rt);
+            draw();
+            EndTextureMode();
+            EndDrawing();
+        }
+        Image img = LoadImageFromTexture(rt.texture);
+        ImageFlipVertical(&img);
+        const bool ok = ExportImage(img, argv[2]);
+        UnloadImage(img);
+        UnloadRenderTexture(rt);
+        rlImGuiShutdown();
+        CloseWindow();
+        return ok ? 0 : 1;
+    }
     while (!WindowShouldClose()) {
         // In the background the window has nothing to keep up with.
         SetTargetFPS(IsWindowFocused() ? 60 : 15);
         BeginDrawing();
-        ClearBackground(Color{4, 7, 10, 255});
-        rlImGuiBegin();
-        ui.frame();
-        rlImGuiEnd();
+        draw();
         EndDrawing();
     }
     if (ui.dirty) saveSettings(path, ui.s);
