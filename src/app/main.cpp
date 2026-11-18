@@ -17,6 +17,7 @@
 #include "../bridge.hpp"
 #include "../devices.hpp"
 #include "../settings.hpp"
+#include "scroll.hpp"
 #include "theme.hpp"
 
 using namespace spinjitzu;
@@ -148,7 +149,6 @@ static void worker(Bridge& b) {
 
 // Ink on paper (theme.hpp). Every control is drawn with an ink border, so
 // none of them can go unseen again, as Armed once did.
-static ImVec4 col(theme::Rgb c, float a = 1.0f) { return ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, a); }
 static const ImVec4 kInk = col(theme::kSumi);
 static const ImVec4 kFadedInk = col(theme::kFaded);
 static const ImVec4 kSeal = col(theme::kShu);
@@ -231,6 +231,7 @@ struct Ui {
     std::string accel;            // what KDE said, when asked
     std::vector<std::string> log;
     int forceTab = -1;            // --shot: the tab to draw
+    Art art;
 
     int* slotKey(int slot) {
         if (slot == kSlotCalibrate) return &s.keyCalibrate;
@@ -278,19 +279,24 @@ struct Ui {
     }
 
     void header(const Shown& sh) {
-        ImGui::TextColored(kIndigo, "SPINJITZU");
-        ImGui::SameLine();
-        if (!s.cHand) ImGui::TextColored(kSeal, "| not calibrated");
+        logo(art, 84, theme::kSumi);
+        ImGui::SameLine(0, 16);
+        ImGui::BeginGroup();
+        ImGui::PushFont(art.display, 30);
+        ImGui::TextUnformatted("Spinjitzu");
+        ImGui::PopFont();
+        if (!s.cHand) ImGui::TextColored(kSeal, "Not calibrated");
         else {
-            ImGui::TextDisabled("| %lld counts a turn by hand, %lld virtual", (long long)s.cHand, (long long)s.cVirtual);
+            ImGui::Text("%lld counts a turn by hand, %lld virtual,", (long long)s.cHand, (long long)s.cVirtual);
             ImGui::SameLine();
             if (s.checked) ImGui::TextColored(kIndigo, "checked");
             else ImGui::TextColored(kSeal, "not checked: test 360 in Calibrate");
         }
+        ImGui::TextDisabled("%s", sh.core.doing.c_str());
+        ImGui::EndGroup();
         ImGui::SameLine(ImGui::GetWindowWidth() - 140);
         if (ImGui::Checkbox("Armed", &s.armed)) changed();
         if (!sh.problem.empty()) ImGui::TextColored(kSeal, "%s", sh.problem.c_str());
-        ImGui::TextDisabled("%s", sh.core.doing.c_str());
         ImGui::Separator();
     }
 
@@ -403,17 +409,23 @@ struct Ui {
                                            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
         header(sh);
         ImGui::BeginChild("tabs", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 6));
-        auto tab = [&](int i) { return forceTab == i ? ImGuiTabItemFlags_SetSelected : 0; };
+        // Tab names in the display face, what is under them in the body's.
+        auto tab = [&](const char* name, int i) {
+            ImGui::PushFont(art.display, 19);
+            const bool open = ImGui::BeginTabItem(name, nullptr, forceTab == i ? ImGuiTabItemFlags_SetSelected : 0);
+            ImGui::PopFont();
+            return open;
+        };
         if (ImGui::BeginTabBar("tabs")) {
-            if (ImGui::BeginTabItem("Calibrate", nullptr, tab(0))) { calibrateTab(sh); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Turns", nullptr, tab(1))) { turnsTab(); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Boomerang", nullptr, tab(2))) { boomerangTab(); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Motion", nullptr, tab(3))) {
+            if (tab("Calibrate", 0)) { calibrateTab(sh); ImGui::EndTabItem(); }
+            if (tab("Turns", 1)) { turnsTab(); ImGui::EndTabItem(); }
+            if (tab("Boomerang", 2)) { boomerangTab(); ImGui::EndTabItem(); }
+            if (tab("Motion", 3)) {
                 ImGui::TextDisabled("For every turn without its own.");
                 motionRow("defaults", &s.speed, &s.curve, &s.jitter);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Output", nullptr, tab(4))) { outputTab(sh); ImGui::EndTabItem(); }
+            if (tab("Output", 4)) { outputTab(sh); ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         ImGui::EndChild();
@@ -443,6 +455,7 @@ int main(int argc, char** argv) {
     rlImGuiSetup(true);
     ImGui::GetIO().IniFilename = nullptr;
     applyTheme();
+    ui.art = loadArt();
 
     auto draw = [&] {
         ClearBackground(Color{theme::kTable.r, theme::kTable.g, theme::kTable.b, 255});

@@ -31,8 +31,22 @@ target_include_directories(imgui PUBLIC third_party/imgui third_party/rlImGui ${
 target_compile_definitions(imgui PUBLIC NO_FONT_AWESOME)
 target_compile_options(imgui PRIVATE -w)
 
+# Fonts and the logo are carried inside the binary as byte arrays, so it runs
+# from wherever it is put. Written again when an asset changes.
+function(embed name file)
+    file(READ ${CMAKE_SOURCE_DIR}/${file} hex HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," bytes "${hex}")
+    file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/embed/${name}.h
+         CONTENT "static const unsigned char ${name}[] = {${bytes}};\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/${file})
+endfunction()
+embed(kShojumaru assets/fonts/Shojumaru-Regular.ttf)
+embed(kNotoMedium assets/fonts/NotoSerifCJKjp-Medium-subset.otf)
+embed(kNotoBlack assets/fonts/NotoSerifCJKjp-Black-subset.otf)
+embed(kLogo assets/logo.png)
+
 add_executable(spinjitzu src/app/main.cpp)
-target_include_directories(spinjitzu PRIVATE ${EVDEV_INCLUDE_DIRS})
+target_include_directories(spinjitzu PRIVATE ${EVDEV_INCLUDE_DIRS} ${CMAKE_BINARY_DIR}/embed)
 target_link_libraries(spinjitzu imgui ${RAYLIB_LIBRARIES} ${EVDEV_LIBRARIES} Threads::Threads m dl)
 
 add_executable(spike src/spike/main.cpp)
