@@ -166,11 +166,12 @@ static void applyTheme() {
     st.WindowBorderSize = 0;
     st.FrameBorderSize = 1;
     st.TabBorderSize = 0;
+    st.TabBarBorderSize = 0;
     st.GrabMinSize = 12;
     ImVec4* c = st.Colors;
     c[ImGuiCol_Text] = kInk;
     c[ImGuiCol_TextDisabled] = kFadedInk;
-    c[ImGuiCol_WindowBg] = col(kWashi);
+    c[ImGuiCol_WindowBg] = col(kWashi, 0);   // the paper is drawn under it
     c[ImGuiCol_ChildBg] = col(kWashi, 0);
     c[ImGuiCol_PopupBg] = col(kWashi);
     c[ImGuiCol_Border] = col(kSumi, 0.8f);
@@ -189,8 +190,8 @@ static void applyTheme() {
     c[ImGuiCol_HeaderActive] = col(mix(kSumi, kWell, 0.12));
     c[ImGuiCol_Separator] = col(kSumi, 0.45f);
     c[ImGuiCol_Tab] = col(kWashi, 0);
-    c[ImGuiCol_TabHovered] = col(kWell);
-    c[ImGuiCol_TabSelected] = col(kWell);
+    c[ImGuiCol_TabHovered] = col(kWell, 0.7f);
+    c[ImGuiCol_TabSelected] = col(kWashi, 0);   // a cinnabar stroke marks it instead
     c[ImGuiCol_TabSelectedOverline] = kSeal;
     c[ImGuiCol_TabDimmed] = col(kWashi, 0);
     c[ImGuiCol_TabDimmedSelected] = col(kWashi, 0);
@@ -231,7 +232,15 @@ struct Ui {
     std::string accel;            // what KDE said, when asked
     std::vector<std::string> log;
     int forceTab = -1;            // --shot: the tab to draw
+    double fixedClock = -1;       // --shot: the time to draw at
     Art art;
+    Texture2D paper{};
+    bool shownArmed = false;      // what the seal and the title show
+    double armedAt = -1e9;        // when that last changed
+
+    double clock() const { return fixedClock >= 0 ? fixedClock : GetTime(); }
+    // The taskbar shows whether the turn keys work, while the game has focus.
+    void title() const { SetWindowTitle(shownArmed ? "Spinjitzu スピン術 (armed)" : "Spinjitzu スピン術 (not armed)"); }
 
     int* slotKey(int slot) {
         if (slot == kSlotCalibrate) return &s.keyCalibrate;
@@ -279,6 +288,7 @@ struct Ui {
     }
 
     void header(const Shown& sh) {
+        const ImVec2 top = ImGui::GetCursorPos();
         logo(art, 84, theme::kSumi);
         ImGui::SameLine(0, 16);
         ImGui::BeginGroup();
@@ -294,10 +304,31 @@ struct Ui {
         }
         ImGui::TextDisabled("%s", sh.core.doing.c_str());
         ImGui::EndGroup();
-        ImGui::SameLine(ImGui::GetWindowWidth() - 140);
-        if (ImGui::Checkbox("Armed", &s.armed)) changed();
+        const ImVec2 below = ImGui::GetCursorPos();
+
+        // The seal at the right, with what it means beside it; the seal and
+        // its words are one button.
+        const float side = 78, gap = 14, right = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
+        const char* state = s.armed ? "Armed" : "Not armed";
+        const char* means = s.armed ? "turn keys work" : "turn keys do nothing";
+        ImGui::PushFont(art.display, 21);
+        const ImVec2 stateSize = ImGui::CalcTextSize(state);
+        ImGui::PopFont();
+        const ImVec2 meansSize = ImGui::CalcTextSize(means);
+        const float words = std::max(stateSize.x, meansSize.x);
+        ImGui::SetCursorPos(ImVec2(right - side - gap - words, top.y + 2));
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::InvisibleButton("armed", ImVec2(words + gap + side, side))) { s.armed = !s.armed; changed(); }
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float ty = p.y + side / 2 - (stateSize.y + meansSize.y) / 2;
+        dl->AddText(art.display, 21, ImVec2(p.x + words - stateSize.x, ty), ImGui::GetColorU32(s.armed ? kSeal : kInk), state);
+        dl->AddText(ImVec2(p.x + words - meansSize.x, ty + stateSize.y), ImGui::GetColorU32(kInk), means);
+        seal(art, ImVec2(p.x + words + gap, p.y), side, shownArmed, clock() - armedAt);
+
+        ImGui::SetCursorPos(ImVec2(below.x, std::max(below.y, top.y + side + 6)));
         if (!sh.problem.empty()) ImGui::TextColored(kSeal, "%s", sh.problem.c_str());
-        ImGui::Separator();
+        rule(2.6f, 1);
     }
 
     void calibrateTab(const Shown& sh) {
@@ -314,7 +345,7 @@ struct Ui {
         ImGui::Spacing();
         if (sh.core.calibrating || sh.core.correcting)
             ImGui::TextColored(kIndigo, "%lld counts", (long long)sh.core.calNet);
-        ImGui::Separator();
+        rule(1.6f, 2);
         ImGui::BeginChild("log", ImVec2(0, 0));
         for (const std::string& l : log) ImGui::TextUnformatted(l.c_str());
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
@@ -339,7 +370,7 @@ struct Ui {
         for (size_t i = 0; i < s.turns.size(); i++) {
             TurnBind& t = s.turns[i];
             ImGui::PushID((int)i);
-            ImGui::Separator();
+            if (i) rule(1.4f, 10 + (uint32_t)i);
             bindButton(kSlotTurn0 + (int)i);
             ImGui::SameLine();
             int dir = t.dir < 0 ? 0 : 1;
@@ -353,7 +384,7 @@ struct Ui {
             ImGui::PopID();
         }
         if (remove >= 0) { s.turns.erase(s.turns.begin() + remove); changed(); }
-        ImGui::Separator();
+        rule(1.4f, 3);
         if (ImGui::Button("+ Add turn")) { s.turns.push_back(TurnBind{}); changed(); capturing = kSlotTurn0 + (int)s.turns.size() - 1; b.capture(capturing); }
     }
 
@@ -391,7 +422,7 @@ struct Ui {
 
     void footer(const Shown& sh) {
         const Core::Last& l = sh.core.last;
-        ImGui::Separator();
+        rule(2.6f, 4);
         if (!l.any) { ImGui::TextDisabled("no turn yet"); return; }
         ImGui::Text("last turn: %.3f degrees, %lld counts", (double)l.milli / kMilli, (long long)l.counts);
         ImGui::SameLine();
@@ -403,10 +434,18 @@ struct Ui {
     void frame() {
         const Shown sh = b.look();
         apply(sh);
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(ImVec2((float)GetScreenWidth(), (float)GetScreenHeight()));
+        if (s.armed != shownArmed) {
+            shownArmed = s.armed;
+            armedAt = clock();
+            title();
+        }
+        // The window's widgets sit on the paper, between the roller and the cover.
+        const Frame f = frameFor((float)GetScreenWidth(), (float)GetScreenHeight());
+        ImGui::SetNextWindowPos(ImVec2(f.contentL(), f.paperT + 6));
+        ImGui::SetNextWindowSize(ImVec2(f.contentR() - f.contentL(), f.paperB - f.paperT - 12));
         ImGui::Begin("Spinjitzu", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                           ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
+                                           ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         header(sh);
         ImGui::BeginChild("tabs", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 6));
         // Tab names in the display face, what is under them in the body's.
@@ -414,6 +453,11 @@ struct Ui {
             ImGui::PushFont(art.display, 19);
             const bool open = ImGui::BeginTabItem(name, nullptr, forceTab == i ? ImGuiTabItemFlags_SetSelected : 0);
             ImGui::PopFont();
+            if (open) {   // the open tab, underlined in cinnabar
+                const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+                brush(ImGui::GetWindowDrawList(), ImVec2(lo.x + 4, hi.y - 2), ImVec2(hi.x - 4, hi.y - 2), 3.2f,
+                      ImGui::GetColorU32(kSeal), 50 + i);
+            }
             return open;
         };
         if (ImGui::BeginTabBar("tabs")) {
@@ -456,15 +500,22 @@ int main(int argc, char** argv) {
     ImGui::GetIO().IniFilename = nullptr;
     applyTheme();
     ui.art = loadArt();
+    ui.paper = makePaper();
+    // Settled from the start: the seal stamps only when it is changed.
+    ui.shownArmed = ui.s.armed;
+    ui.title();
 
     auto draw = [&] {
         ClearBackground(Color{theme::kTable.r, theme::kTable.g, theme::kTable.b, 255});
+        drawScroll(ui.paper, (float)GetScreenWidth(), (float)GetScreenHeight());
         rlImGuiBegin();
         ui.frame();
         rlImGuiEnd();
     };
     if (shot) {
         ui.forceTab = argc > 3 ? atoi(argv[3]) : 0;
+        ui.fixedClock = argc > 4 ? atof(argv[4]) : 100;
+        if (argc > 5) ui.shownArmed = ui.s.armed = atoi(argv[5]) != 0;
         // A hidden window's own picture is undefined: draw into a texture.
         const RenderTexture2D rt = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
         for (int i = 0; i < 4; i++) {   // ImGui lays a window out over its first frames
