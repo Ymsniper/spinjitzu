@@ -60,6 +60,19 @@ int main() {
     chk(got == kAsks && slotsRight, "every binding asked for comes back once, for the slot that asked");
     chk(logs == kAsks, "every log line arrives once");
 
+    {
+        Bridge a;
+        Core::Out on;
+        on.armedNew = on.armed = true;
+        a.tell(on);
+        Core::Out later;                  // the worker's next round, nothing new
+        later.armed = true;
+        a.tell(later);
+        const Shown sh = a.look();
+        chk(sh.core.armedNew && sh.core.armed && !a.look().core.armedNew,
+            "an Armed change is kept until the window looks, then handed over once");
+    }
+
     // The arm key pressed an odd number of times in the worker while the
     // window keeps sending settings it changed for other reasons: no press
     // is lost or undone, and both sides end on the same state.

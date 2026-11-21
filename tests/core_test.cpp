@@ -71,6 +71,56 @@ int main() {
         chk(r.said("too small") && r.s.cHand == 0, "a hand turn of 150 counts is refused");
     }
 
+    // ── the speed check ─────────────────────────────────────────────────────
+    auto checkedRig = [](Rig& r) {
+        r.calibrate(16000);
+        r.press(r.s.keyTest);
+        r.run();
+        r.press(r.s.keyCalibrate);
+    };
+    // Ticks until a test 360 has gone out and the hand is asked for.
+    auto testTicks = [](Rig& r) {
+        r.press(r.s.keyTest);
+        int ticks = 0;
+        for (; ticks < 20000; ticks++) {
+            r.now += kTick;
+            const int64_t n = r.c.tick(r.now);
+            r.sent += n;
+            r.view += n;
+            const Core::Out o = r.c.take();
+            for (auto& l : o.log) r.log.push_back(l);
+            if (o.doing.rfind("back on the mark", 0) == 0) break;
+        }
+        return ticks;
+    };
+    {
+        Rig slow;
+        slow.calibrate(16000);
+        const int slowTicks = testTicks(slow);
+        Rig r;
+        checkedRig(r);
+        const std::string before = toText(r.s);
+        const int64_t sentBefore = r.sent;
+        const int fastTicks = testTicks(r);
+        r.press(r.s.keyCalibrate);
+        chk(r.said("speed check: a 360 at four times") && r.sent - sentBefore == 16000 && fastTicks * 3 < slowTicks,
+            "once checked, the test key runs the speed check: the same 360, four times as fast");
+        chk(r.said("the fast 360 landed") && toText(r.s) == before, "a speed check that lands says so, and the calibration is exactly as it was");
+    }
+    {
+        Rig r;
+        checkedRig(r);
+        const std::string before = toText(r.s);
+        testTicks(r);
+        for (int i = 0; i < 8; i++) r.hand(-40);   // the game turned 320 counts too far
+        r.press(r.s.keyCalibrate);
+        chk(r.said("the fast 360 was -320 counts off") && toText(r.s) == before,
+            "a speed check that lands off says by how much, and still leaves the calibration alone");
+        r.log.clear();
+        testTicks(r);
+        chk(r.said("speed check: a 360 at four times"), "the speed check can be run again");
+    }
+
     // ── turns ───────────────────────────────────────────────────────────────
     auto armed = [](Rig& r) {
         r.calibrate(1000);

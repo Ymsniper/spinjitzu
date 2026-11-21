@@ -342,17 +342,28 @@ struct Ui {
     }
 
     void calibrateTab(const Shown& sh) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 600);   // lines short enough to read
         ImGui::TextWrapped("In the game, crosshair on a sharp mark:");
         for (const char* step : {"press the hand 360 key, turn one full circle by hand back onto the mark, press it again;",
                                  "press the test key: the tool turns a full circle, you put the crosshair back on the mark, then the hand 360 key;",
-                                 "test again until it lands on the mark and says checked."}) {
+                                 "test again until it lands on the mark and says checked;",
+                                 "then the test key runs the speed check: the same circle four times as fast. Back on the mark by hand, "
+                                 "then the hand 360 key: if it was off, the game sees acceleration on Spinjitzu's mouse."}) {
             ImGui::Bullet();
             ImGui::TextWrapped("%s", step);
         }
+        ImGui::PopTextWrapPos();
         ImGui::Spacing();
         ImGui::Text("Hand 360 key");  ImGui::SameLine(160); bindButton(kSlotCalibrate);
         ImGui::Text("Test 360 key");  ImGui::SameLine(160); bindButton(kSlotTest);
         ImGui::Spacing();
+        if (s.checked) {
+            if (sh.core.speedCheck == 1) ImGui::TextColored(kIndigo, "Speed check: it landed. The game does not see acceleration.");
+            else if (sh.core.speedCheck == 2)
+                ImGui::TextColored(kSeal, "Speed check: %lld counts off. The game sees acceleration on Spinjitzu's mouse: see Output.",
+                                   (long long)sh.core.speedOff);
+            else ImGui::TextDisabled("Speed check: not run yet.");
+        }
         if (sh.core.calibrating || sh.core.correcting)
             ImGui::TextColored(kIndigo, "%lld counts", (long long)sh.core.calNet);
         rule(1.6f, 2);

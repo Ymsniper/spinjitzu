@@ -31,6 +31,8 @@ public:
         bool newC = false;        // the calibration changed: save these
         bool armedNew = false;    // Armed changed: show and save `armed`
         bool armed = false;
+        int speedCheck = 0;       // 0: not done, 1: the fast 360 landed, 2: it did not
+        int64_t speedOff = 0;     // by how many counts it did not
         int64_t cHand = 0, cVirtual = 0;
         bool checked = false;
         Last last;
@@ -165,7 +167,7 @@ private:
     std::string doing() const {
         switch (phase_) {
         case Phase::Recording: return "hand 360: turn back onto the mark, then " + keyName(s_.keyCalibrate);
-        case Phase::Testing: return "test 360 turning";
+        case Phase::Testing: return speedTest_ ? "speed check turning" : "test 360 turning";
         case Phase::Correcting: return "back on the mark by hand, then " + keyName(s_.keyCalibrate);
         case Phase::Turning: return "turning";
         case Phase::Spinning: return "boomerang";
@@ -213,6 +215,18 @@ private:
         } else if (phase_ == Phase::Correcting) {
             const int64_t k = correction_;
             phase_ = Phase::Idle;
+            if (speedTest_) {
+                // Only a report: a figure taken at one speed through
+                // acceleration is wrong at every other, so C is left alone.
+                speedTest_ = false;
+                const bool landed = std::fabs((double)k) <= tolerance();
+                out_.speedCheck = landed ? 1 : 2;
+                out_.speedOff = k;
+                say(landed ? "speed check: the fast 360 landed, so the game does not see acceleration on Spinjitzu's mouse"
+                           : "speed check: the fast 360 was " + std::to_string(k) +
+                                 " counts off, so the game sees acceleration on Spinjitzu's mouse: see Output");
+                return;
+            }
             const auto c = corrected(s_.cVirtual, s_.cHand, k);
             if (!c) { say("that correction is not one a turn could need: do the hand 360 again"); return; }
             s_.checked = std::fabs((double)k) <= tolerance();
@@ -227,13 +241,17 @@ private:
     void testKey(Ns t) {
         if (phase_ != Phase::Idle) return;
         if (s_.cHand < kLeastCalibration) { say("do a hand 360 first (" + keyName(s_.keyCalibrate) + ")"); return; }
+        // Once a test has landed, the next one checks for acceleration: the
+        // same 360 four times as fast lands on the mark only if speed does
+        // not change how far the game turns.
+        speedTest_ = s_.checked;
         Motion::Orders o;
-        o.degPerSec = 360.0;
+        o.degPerSec = speedTest_ ? 4 * 360.0 : 360.0;
         motion_.start(s_.cVirtual, kFullTurnMilli, o, t);
         correction_ = 0;
         out_.calNet = 0;
         phase_ = Phase::Testing;
-        say("test 360: " + std::to_string(s_.cVirtual) + " counts");
+        say((speedTest_ ? "speed check: a 360 at four times the speed, " : "test 360: ") + std::to_string(s_.cVirtual) + " counts");
     }
 
     void startTurn(const TurnBind& tb, Ns t) {
@@ -272,6 +290,7 @@ private:
         } else if (phase_ == Phase::Recording) {
             cal_.cancel();
         }
+        speedTest_ = false;
         capturing_ = -1;
         if (phase_ != Phase::Idle) say("stopped");
         phase_ = Phase::Idle;
@@ -293,6 +312,7 @@ private:
     Phase phase_ = Phase::Idle;
     std::vector<int64_t> hands_;
     int64_t correction_ = 0;
+    bool speedTest_ = false;      // the test under way is the speed check
     int capturing_ = -1, spinKey_ = 0;
     Ns captureFrom_ = 0;
     bool armed_ = false;
