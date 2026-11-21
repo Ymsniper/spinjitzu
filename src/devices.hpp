@@ -94,19 +94,25 @@ inline int codeOf(const std::string& name) {
     return c > 0 && c < 768 ? c : 0;
 }
 
+// What a command prints, lines joined by spaces; empty if it could not run.
+inline std::string run(const std::string& cmd) {
+    FILE* p = popen((cmd + " 2>/dev/null").c_str(), "r");
+    if (!p) return "";
+    std::string out;
+    char b[256];
+    while (fgets(b, sizeof b, p)) { out += b; if (!out.empty() && out.back() == '\n') out.back() = ' '; }
+    pclose(p);
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
 // What KDE has set for a device's acceleration, read through KWin. Empty
 // where KDE does not say.
 inline std::string accelOf(const std::string& node) {
     if (node.empty()) return "";
-    const std::string cmd = "busctl --user get-property org.kde.KWin /org/kde/KWin/InputDevice/" + node +
-                            " org.kde.KWin.InputDevice pointerAcceleration pointerAccelerationProfileFlat"
-                            " pointerAccelerationProfileAdaptive 2>/dev/null";
-    FILE* p = popen(cmd.c_str(), "r");
-    if (!p) return "";
-    std::string out;
-    char b[128];
-    while (fgets(b, sizeof b, p)) { out += b; if (!out.empty() && out.back() == '\n') out.back() = ' '; }
-    pclose(p);
+    const std::string out = run("busctl --user get-property org.kde.KWin /org/kde/KWin/InputDevice/" + node +
+                                " org.kde.KWin.InputDevice pointerAcceleration pointerAccelerationProfileFlat"
+                                " pointerAccelerationProfileAdaptive");
     // busctl prints "d 0" "b true" "b false": speed, flat, adaptive
     double speed = 0;
     char flat[8] = "", adaptive[8] = "";

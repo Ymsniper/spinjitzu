@@ -13,6 +13,7 @@
 #include "kNotoBlack.h"
 #include "kNotoMedium.h"
 #include "kShojumaru.h"
+#include "../devices.hpp"
 #include "theme.hpp"
 
 namespace spinjitzu {
@@ -309,6 +310,83 @@ inline void seal(const Art& a, ImVec2 p, float side, bool armed, double since) {
         dl->AddPolyline(sq.data(), (int)sq.size(), ImGui::GetColorU32(col(kSumi)), ImDrawFlags_Closed, 2.5f);
         transformSince(dl, from, c, 1, -1.0f, k);
     }
+}
+
+// ── the opening ───────────────────────────────────────────────────────────────
+
+constexpr double kOpenHold = 0.30, kOpenRoll = 0.80;   // seconds closed, then unrolling
+
+// The desktop asked for no animation: KDE's speed at 0, or GNOME's switch off.
+inline bool desktopStill() {
+    const char* d = getenv("XDG_CURRENT_DESKTOP");
+    const std::string desk = d ? d : "";
+    if (desk.find("KDE") != std::string::npos) {
+        std::string f = run("kreadconfig6 --group KDE --key AnimationDurationFactor");
+        if (f.empty()) f = run("kreadconfig5 --group KDE --key AnimationDurationFactor");
+        return !f.empty() && atof(f.c_str()) == 0.0;
+    }
+    if (desk.find("GNOME") != std::string::npos)
+        return run("gsettings get org.gnome.desktop.interface enable-animations") == "false";
+    return false;
+}
+
+// A cylinder standing upright, lit from the left.
+inline void cylinder(ImDrawList* dl, float x, float w, float top, float bottom, theme::Rgb dark, theme::Rgb light, float a) {
+    const ImU32 d = ImGui::GetColorU32(col(dark, a)), l = ImGui::GetColorU32(col(light, a));
+    const float m = x + w * 0.35f;
+    dl->AddRectFilledMultiColor(ImVec2(x, top), ImVec2(m, bottom), d, l, l, d);
+    dl->AddRectFilledMultiColor(ImVec2(m, top), ImVec2(x + w, bottom), l, d, d, l);
+}
+
+// The scroll opening the way a handscroll is read, right to left: tied shut
+// in its brocade at the right, then laid out until only the wooden roller
+// is left at the left. Drawn over the open window, `t` seconds in.
+inline void opening(const Art& a, float w, float h, double t) {
+    using namespace theme;
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const Frame f = frameFor(w, h);
+    const float u = (float)std::clamp((t - kOpenHold) / kOpenRoll, 0.0, 1.0);
+    const float p = u < 0.5f ? 4 * u * u * u : 1 - std::pow(-2 * u + 2, 3.0f) / 2;
+    // Paper wound round the core: its girth goes as the root of what is left.
+    const float d0 = 86, d1 = f.rollerW;
+    const float d = std::sqrt(d1 * d1 + (d0 * d0 - d1 * d1) * (1 - p));
+    const float cx = (f.coverR - d0 / 2) + ((f.rollerX + d1 / 2) - (f.coverR - d0 / 2)) * p;
+    const float top = f.paperT - 3, bottom = f.paperB + 3, x = cx - d / 2;
+
+    dl->AddRectFilled(ImVec2(0, 0), ImVec2(cx, h), ImGui::GetColorU32(col(kTable)));
+    dl->AddRectFilledMultiColor(ImVec2(x - 16, top + 4), ImVec2(x, bottom + 6), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 110),
+                                IM_COL32(0, 0, 0, 110), IM_COL32(0, 0, 0, 0));
+    // The core's gold knobs, above and below the paper the whole time.
+    for (const float ky : {top - 13, bottom + 3})
+        cylinder(dl, cx - (d1 + 4) / 2, d1 + 4, ky, ky + 10, mix(kTable, kKin, 0.35), mix(kWhite, kKin, 0.45), 1);
+    // The back of the paper, wound up.
+    cylinder(dl, x, d, top, bottom, mix(kBurn, kTable, 0.55), kWashi, 1);
+    // Still tied shut: the brocade outside, the title slip, the Sensei, the
+    // cord. Gone with the first turn of the cover.
+    const float shut = 1 - std::clamp(p / 0.05f, 0.0f, 1.0f);
+    if (shut > 0) {
+        cylinder(dl, x, d, top, bottom, mix(kTable, kAi, 0.5), mix(kWhite, kAi, 0.22), shut);
+        for (int row = 0; top + 8 + row * 9 < bottom - 4; row++)
+            for (float lx = x + 6 + (row % 2) * 5; lx < x + d - 5; lx += 10)
+                dl->AddNgonFilled(ImVec2(lx, top + 8 + row * 9), 2.2f, ImGui::GetColorU32(col(kKin, 0.38f * shut)), 4);
+        const float sw = 24, sx = cx - sw / 2, sy = top + 30, g = 17;
+        dl->AddRectFilled(ImVec2(sx, sy), ImVec2(sx + sw, sy + 4 * g + 16), ImGui::GetColorU32(col(kWashi, shut)));
+        dl->AddRect(ImVec2(sx, sy), ImVec2(sx + sw, sy + 4 * g + 16), ImGui::GetColorU32(col(kKin, shut)));
+        const char* glyph[4] = {"ス", "ピ", "ン", "術"};
+        for (int i = 0; i < 4; i++) {
+            const ImVec2 sz = a.seal->CalcTextSizeA(g, 1e9f, 0, glyph[i]);
+            dl->AddText(a.seal, g, ImVec2(cx - sz.x / 2, sy + 8 + i * g), ImGui::GetColorU32(col(kSumi, shut)), glyph[i]);
+        }
+        const float lw = d - 12, lh = lw * (float)a.logo.height / (float)a.logo.width, ly = (top + bottom) / 2 - lh / 2 + 20;
+        dl->AddImage(ImTextureID(a.logo.id), ImVec2(cx - lw / 2, ly), ImVec2(cx + lw / 2, ly + lh), ImVec2(0, 0), ImVec2(1, 1),
+                     ImGui::GetColorU32(col(kKin, shut)));
+        const float cy = ly + lh + 26;
+        dl->AddRectFilled(ImVec2(x - 1, cy), ImVec2(x + d + 1, cy + 4), ImGui::GetColorU32(col(kKin, shut)));
+        dl->AddRectFilled(ImVec2(x - 1, cy + 4), ImVec2(x + d + 1, cy + 5), ImGui::GetColorU32(col(kTable, 0.5f * shut)));
+    }
+    // The last of the paper off: the wooden core is the roller.
+    const float wood = std::clamp((p - 0.9f) / 0.1f, 0.0f, 1.0f);
+    if (wood > 0) cylinder(dl, x, d, top - 2, bottom + 2, mix(kTable, kKuri, 0.45), mix(kWashi, kKuri, 0.22), wood);
 }
 
 }  // namespace spinjitzu

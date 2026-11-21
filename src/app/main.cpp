@@ -235,6 +235,7 @@ struct Ui {
     double fixedClock = -1;       // --shot: the time to draw at
     Art art;
     Texture2D paper{};
+    double openAt = -1;           // when the scroll began to open; <0: it is open
     bool shownArmed = false;      // what the seal and the title show
     double armedAt = -1e9;        // when that last changed
 
@@ -439,13 +440,17 @@ struct Ui {
             armedAt = clock();
             title();
         }
+        // Opening, nothing takes a click: the click that skips it lands on
+        // no control under the roll.
+        const bool opening = openAt >= 0 && clock() - openAt < kOpenHold + kOpenRoll;
         // The window's widgets sit on the paper, between the roller and the cover.
         const Frame f = frameFor((float)GetScreenWidth(), (float)GetScreenHeight());
         ImGui::SetNextWindowPos(ImVec2(f.contentL(), f.paperT + 6));
         ImGui::SetNextWindowSize(ImVec2(f.contentR() - f.contentL(), f.paperB - f.paperT - 12));
         ImGui::Begin("Spinjitzu", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                                           (opening ? ImGuiWindowFlags_NoInputs : 0));
         header(sh);
         ImGui::BeginChild("tabs", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 6));
         // Tab names in the display face, what is under them in the body's.
@@ -475,6 +480,11 @@ struct Ui {
         ImGui::EndChild();
         footer(sh);
         ImGui::End();
+        if (opening) {
+            ::spinjitzu::opening(art, (float)GetScreenWidth(), (float)GetScreenHeight(), clock() - openAt);
+            if (fixedClock < 0 && (GetKeyPressed() || IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)))
+                openAt = -1;
+        } else openAt = -1;
         // Written once the changes stop, not on every step of a slider.
         if (dirty && !path.empty() && GetTime() - changedAt > 0.5) { saveSettings(path, s); dirty = false; }
     }
@@ -504,6 +514,7 @@ int main(int argc, char** argv) {
     // Settled from the start: the seal stamps only when it is changed.
     ui.shownArmed = ui.s.armed;
     ui.title();
+    if (!shot && !desktopStill()) ui.openAt = GetTime();
 
     auto draw = [&] {
         ClearBackground(Color{theme::kTable.r, theme::kTable.g, theme::kTable.b, 255});
@@ -516,6 +527,7 @@ int main(int argc, char** argv) {
         ui.forceTab = argc > 3 ? atoi(argv[3]) : 0;
         ui.fixedClock = argc > 4 ? atof(argv[4]) : 100;
         if (argc > 5) ui.shownArmed = ui.s.armed = atoi(argv[5]) != 0;
+        ui.openAt = 0;
         // A hidden window's own picture is undefined: draw into a texture.
         const RenderTexture2D rt = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
         for (int i = 0; i < 4; i++) {   // ImGui lays a window out over its first frames
@@ -527,6 +539,8 @@ int main(int argc, char** argv) {
         }
         Image img = LoadImageFromTexture(rt.texture);
         ImageFlipVertical(&img);
+        // The texture keeps blending's alpha, which a screen ignores.
+        ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8);
         const bool ok = ExportImage(img, argv[2]);
         UnloadImage(img);
         UnloadRenderTexture(rt);
