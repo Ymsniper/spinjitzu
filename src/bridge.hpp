@@ -22,6 +22,7 @@ public:
     // window side
     void settings(const Settings& s) { std::lock_guard<std::mutex> l(m_); settings_ = s; settingsNew_ = true; }
     void capture(int slot) { std::lock_guard<std::mutex> l(m_); capture_ = slot; captureNew_ = true; }
+    void arm(bool on) { std::lock_guard<std::mutex> l(m_); arm_ = on; armNew_ = true; }
     void quit() { std::lock_guard<std::mutex> l(m_); quit_ = true; }
     // What the worker said since the last look: the log and the one-off
     // results are handed over once.
@@ -31,11 +32,12 @@ public:
         shown_.core.log.clear();
         shown_.core.captureSlot = -1;
         shown_.core.newC = false;
+        shown_.core.armedNew = false;
         return s;
     }
 
     // worker side
-    struct Orders { bool settingsNew = false, captureNew = false, quit = false; Settings settings; int capture = -1; };
+    struct Orders { bool settingsNew = false, captureNew = false, armNew = false, arm = false, quit = false; Settings settings; int capture = -1; };
     Orders take() {
         std::lock_guard<std::mutex> l(m_);
         Orders o;
@@ -43,8 +45,10 @@ public:
         if (settingsNew_) o.settings = settings_;
         o.captureNew = captureNew_;
         o.capture = capture_;
+        o.armNew = armNew_;
+        o.arm = arm_;
         o.quit = quit_;
-        settingsNew_ = captureNew_ = false;
+        settingsNew_ = captureNew_ = armNew_ = false;
         return o;
     }
     void tell(const Core::Out& out) {
@@ -52,7 +56,7 @@ public:
         Core::Out& c = shown_.core;
         std::vector<std::string> log = std::move(c.log);
         const int slot = c.captureSlot, code = c.captured;
-        const bool newC = c.newC;
+        const bool newC = c.newC, armedNew = c.armedNew, armed = c.armed;
         c = out;
         log.insert(log.end(), out.log.begin(), out.log.end());
         if (log.size() > 200) log.erase(log.begin(), log.end() - 200);
@@ -60,6 +64,7 @@ public:
         // A one-off the window has not looked at yet is kept until it does.
         if (out.captureSlot < 0 && slot >= 0) { c.captureSlot = slot; c.captured = code; }
         if (!out.newC && newC) c.newC = true;
+        if (!out.armedNew && armedNew) { c.armedNew = true; c.armed = armed; }
     }
     void tellDevices(const std::string& mouse, const std::string& problem, const std::string& mouseNode,
                      const std::string& virtualNode) {
@@ -73,7 +78,7 @@ public:
 private:
     std::mutex m_;
     Settings settings_;
-    bool settingsNew_ = false, captureNew_ = false, quit_ = false;
+    bool settingsNew_ = false, captureNew_ = false, armNew_ = false, arm_ = false, quit_ = false;
     int capture_ = -1;
     Shown shown_;
 };

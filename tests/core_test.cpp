@@ -26,6 +26,7 @@ struct Rig {
         Core::Out o = c.take();
         for (auto& l : o.log) log.push_back(l);
         if (o.newC) { s.cHand = o.cHand; s.cVirtual = o.cVirtual; s.checked = o.checked; c.use(s); }
+        if (o.armedNew) s.armed = o.armed;   // as the window does
     }
     void press(int k) { now += 10 * kTick; c.key(k, 1, now); now += 10 * kTick; c.key(k, 0, now); drain(); }
     void hand(int64_t d) { now += kTick; view += d; c.hand(d, now); }
@@ -83,7 +84,7 @@ int main() {
         back.dir = -1;
         r.s.turns.push_back(back);
         r.c.use(r.s);
-        r.s.armed = true; r.c.use(r.s);
+        r.c.arm(true);
     };
     {
         Rig r;
@@ -97,14 +98,14 @@ int main() {
     {
         Rig r;
         armed(r);
-        r.s.armed = false; r.c.use(r.s);
+        r.c.arm(false);
         r.press(KEY_E); r.run();
         chk(r.sent == 0, "not armed: a turn key does nothing");
     }
     {
         Rig r;
         armed(r);
-        r.s.armed = false; r.c.use(r.s);
+        r.c.arm(false);
         r.press(KEY_E);
         r.press(KEY_Z);
         chk(r.said("E pressed, but not armed") && !r.said("Z pressed"), "a turn key pressed while not armed says why nothing happened; an unbound key says nothing");
@@ -146,6 +147,49 @@ int main() {
         chk(r.sent == part + 250, "the next turn does not make up the part not sent");
     }
 
+    // ── the arm key ─────────────────────────────────────────────────────────
+    {
+        Rig r;
+        armed(r);
+        r.s.keyArm = KEY_F6; r.c.use(r.s);
+        r.press(KEY_F6);
+        chk(!r.s.armed && r.said("not armed (F6)"), "the arm key switches Armed off, and the window hears of it");
+        r.press(KEY_E); r.run();
+        chk(r.sent == 0, "switched off by the arm key, a turn key does nothing");
+        r.press(KEY_F6);
+        r.press(KEY_E); r.run();
+        chk(r.s.armed && r.sent == 250, "switched back on, the turn key turns");
+    }
+    {
+        Rig r;
+        armed(r);
+        r.s.keyArm = KEY_E; r.c.use(r.s);    // the window never allows it, the core holds anyway
+        r.press(KEY_E); r.run();
+        r.press(KEY_E); r.run();
+        chk(r.sent == 0 && r.s.armed, "an arm key that is also a turn key only switches Armed, never turns");
+    }
+    {
+        Rig r;
+        armed(r);
+        r.s.keyArm = KEY_F6; r.c.use(r.s);
+        r.now += kTick; r.c.key(KEY_F6, 1, r.now); r.now += kTick; r.c.key(KEY_F6, 0, r.now);
+        Settings stale = r.s;                // sent before the window heard of the press
+        stale.speed = 999;
+        r.c.use(stale);
+        r.press(KEY_E); r.run();
+        chk(r.sent == 0 && !r.s.armed, "settings sent before the window heard of the arm key do not undo it");
+    }
+    {
+        Rig r;
+        armed(r);
+        r.s.keyArm = KEY_F6; r.c.use(r.s);
+        r.drain();
+        r.c.capture(kSlotTest, r.now);
+        r.now += kTick; r.c.key(KEY_F6, 1, r.now);
+        const Core::Out o = r.c.take();
+        chk(o.captureSlot == kSlotTest && o.captured == KEY_F6 && !o.armedNew, "while waiting for a key, the arm key binds and does not switch");
+    }
+
     // ── binding ─────────────────────────────────────────────────────────────
     {
         Rig r;
@@ -178,7 +222,7 @@ int main() {
         r.s.boom.key = KEY_R;
         r.s.boom.speed = 1440;
         r.c.use(r.s);
-        r.s.armed = true; r.c.use(r.s);
+        r.c.arm(true);
         r.now += kTick; r.c.key(KEY_R, 1, r.now);
         for (int i = 0; i < 700; i++) {
             r.now += kTick;
@@ -202,7 +246,7 @@ int main() {
         r.calibrate(16000);
         r.s.boom.key = KEY_R;
         r.c.use(r.s);
-        r.s.armed = true; r.c.use(r.s);
+        r.c.arm(true);
         r.now += kTick; r.c.key(KEY_R, 1, r.now);
         for (int i = 0; i < 100; i++) { r.now += kTick; r.c.tick(r.now); }
         r.c.keyDeviceGone();
@@ -214,6 +258,7 @@ int main() {
     {
         Settings s;
         s.keyCalibrate = BTN_EXTRA;
+        s.keyArm = KEY_F6;
         s.cHand = 16384;
         s.cVirtual = 16511;
         s.checked = true;
@@ -225,7 +270,7 @@ int main() {
         s.turns.push_back({KEY_E, 7.5, -1, true, 333, Curve::Constant, 12});
         s.turns.push_back({BTN_SIDE, 180, 1, false, 720, Curve::Smooth, 0});
         const Settings b = fromText(toText(s));
-        chk(b.keyCalibrate == BTN_EXTRA && b.cHand == 16384 && b.cVirtual == 16511 && b.checked && b.speed == 1234.5 &&
+        chk(b.keyCalibrate == BTN_EXTRA && b.keyArm == KEY_F6 && fromText("").keyArm == 0 && b.cHand == 16384 && b.cVirtual == 16511 && b.checked && b.speed == 1234.5 &&
                 b.jitter == 7.25 && b.curve == Curve::Constant && b.mouse == s.mouse && b.boom.key == KEY_R &&
                 b.boom.dir == -1 && b.boom.speed == 999.5 && b.boom.finish == Finish::Shortest && b.turns.size() == 2 &&
                 b.turns[0].key == KEY_E && b.turns[0].degrees == 7.5 && b.turns[0].dir == -1 && b.turns[0].own &&

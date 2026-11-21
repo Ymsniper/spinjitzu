@@ -35,6 +35,7 @@ struct BoomBind {
 
 struct Settings {
     int keyCalibrate = KEY_F8, keyTest = KEY_F9, keyPanic = KEY_PAUSE;
+    int keyArm = 0;               // switches Armed from inside the game; none at first
     int64_t cHand = 0, cVirtual = 0;
     bool checked = false;         // a test 360 through the virtual mouse landed on the mark
     bool armed = false;           // turn and boomerang keys work
@@ -66,6 +67,7 @@ inline std::string toText(const Settings& s) {
     o += "calibrate = " + codeName(s.keyCalibrate) + "\n";
     o += "test = " + codeName(s.keyTest) + "\n";
     o += "panic = " + codeName(s.keyPanic) + "\n";
+    o += "arm = " + codeName(s.keyArm) + "\n";
     o += "c_hand = " + std::to_string(s.cHand) + "\n";
     o += "c_virtual = " + std::to_string(s.cVirtual) + "\n";
     o += std::string("checked = ") + (s.checked ? "1" : "0") + "\n";
@@ -116,6 +118,7 @@ inline Settings fromText(const std::string& text) {
         if (k == "calibrate") { if (int x = codeOf(v)) s.keyCalibrate = x; }
         else if (k == "test") { if (int x = codeOf(v)) s.keyTest = x; }
         else if (k == "panic") { if (int x = codeOf(v)) s.keyPanic = x; }
+        else if (k == "arm") s.keyArm = codeOf(v);
         else if (k == "c_hand") c(v, s.cHand);
         else if (k == "c_virtual") c(v, s.cVirtual);
         else if (k == "checked") s.checked = v == "1";

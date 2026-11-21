@@ -12,7 +12,8 @@ SESSION = "src/spike/session.hpp"
 CORE = "src/core.hpp"
 SETTINGS = "src/settings.hpp"
 THEME = "src/app/theme.hpp"
-TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp", "tests/theme_test.cpp"]
+BRIDGE = "src/bridge.hpp"
+TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp", "tests/bridge_test.cpp", "tests/theme_test.cpp"]
 EVDEV = subprocess.run(["pkg-config", "--cflags", "--libs", "libevdev"], capture_output=True, text=True).stdout.split()
 
 BREAKS = [
@@ -104,7 +105,7 @@ BREAKS = [
      "out_.captured = code == KEY_ESC ? 0 : code;",
      "out_.captured = code;"),
     (CORE, "turn keys work when not armed",
-     "if (!armed_) { say(keyName(code) + \" pressed, but not armed: tick Armed at the top right\"); return; }",
+     "if (!armed_) { say(keyName(code) + \" pressed, but not armed: click the seal at the top right\"); return; }",
      ""),
     (CORE, "a press during a turn starts another",
      "if (phase_ != Phase::Idle) return;\n        if (code == s_.boom.key)",
@@ -131,8 +132,20 @@ BREAKS = [
      "if (code == BTN_LEFT) { say(\"left click cannot be bound: press another\"); return; }",
      ""),
     (CORE, "a turn key while not armed says nothing",
-     "if (!armed_) { say(keyName(code) + \" pressed, but not armed: tick Armed at the top right\"); return; }",
+     "if (!armed_) { say(keyName(code) + \" pressed, but not armed: click the seal at the top right\"); return; }",
      "if (!armed_) return;"),
+    (CORE, "the arm key turns as well",
+     "say(armed_ ? \"armed (\" + keyName(code) + \")\" : \"not armed (\" + keyName(code) + \")\");\n            return;",
+     "say(armed_ ? \"armed (\" + keyName(code) + \")\" : \"not armed (\" + keyName(code) + \")\");"),
+    (CORE, "the arm key does not tell the window",
+     "out_.armedNew = true;\n            out_.armed = armed_;",
+     ""),
+    (CORE, "settings put back an Armed the arm key changed",
+     "        s_ = s;\n        if (newLedger)",
+     "        s_ = s;\n        armed_ = s.armed;\n        if (newLedger)"),
+    (BRIDGE, "an arm key press the window has not seen is dropped",
+     "        if (!out.armedNew && armedNew) { c.armedNew = true; c.armed = armed; }\n",
+     ""),
     (THEME, "the ink fades to a grey nobody can read",
      "constexpr Rgb kSumi{0x2A, 0x21, 0x19};",
      "constexpr Rgb kSumi{0x8A, 0x81, 0x79};"),
@@ -155,7 +168,7 @@ def main():
             fails, built = [], True
             for t in TESTS:
                 exe = os.path.join(tmp, "t")
-                b = subprocess.run(["g++", "-std=c++20", "-O1", "-o", exe, os.path.join(tmp, t)] + EVDEV,
+                b = subprocess.run(["g++", "-std=c++20", "-O1", "-pthread", "-o", exe, os.path.join(tmp, t)] + EVDEV,
                                    capture_output=True, text=True)
                 if b.returncode != 0:
                     print(f"BUILD  {name}: the broken copy does not build\n{b.stderr[:400]}")

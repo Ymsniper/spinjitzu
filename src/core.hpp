@@ -13,8 +13,8 @@
 namespace spinjitzu {
 
 // What can be bound, as the window numbers it: the three fixed keys, the
-// boomerang, then each turn.
-enum Slot { kSlotCalibrate, kSlotTest, kSlotPanic, kSlotBoomerang, kSlotTurn0 };
+// boomerang, the arm key, then each turn.
+enum Slot { kSlotCalibrate, kSlotTest, kSlotPanic, kSlotBoomerang, kSlotArm, kSlotTurn0 };
 
 class Core {
 public:
@@ -29,6 +29,8 @@ public:
         int captureSlot = -1;     // a capture that ended: its slot, and the code (0: cancelled)
         int captured = 0;
         bool newC = false;        // the calibration changed: save these
+        bool armedNew = false;    // Armed changed: show and save `armed`
+        bool armed = false;
         int64_t cHand = 0, cVirtual = 0;
         bool checked = false;
         Last last;
@@ -36,11 +38,19 @@ public:
     };
 
     // The settings to work by. A turn under way keeps the orders it began with.
+    // Armed is not taken from them: settings the window sent before it heard
+    // of an arm key press would put the old state back. It comes by arm().
     void use(const Settings& s) {
         const bool newLedger = s.cVirtual != s_.cVirtual;
         s_ = s;
-        armed_ = s.armed;
         if (newLedger) ledger_ = Ledger(std::max<int64_t>(s_.cVirtual, kLeastCalibration));
+    }
+
+    // Armed, as the window set it; told back, so both ends agree.
+    void arm(bool on) {
+        armed_ = on;
+        out_.armedNew = true;
+        out_.armed = on;
     }
 
     // The next key or button pressed binds `slot`. Keys held now count only
@@ -72,11 +82,18 @@ public:
             return;
         }
         if (code == s_.keyPanic) { panic(); return; }
+        if (code == s_.keyArm) {
+            armed_ = !armed_;
+            out_.armedNew = true;
+            out_.armed = armed_;
+            say(armed_ ? "armed (" + keyName(code) + ")" : "not armed (" + keyName(code) + ")");
+            return;
+        }
         if (code == s_.keyCalibrate) { calibrateKey(); return; }
         if (code == s_.keyTest) { testKey(t); return; }
         const bool bound = code == s_.boom.key || std::any_of(s_.turns.begin(), s_.turns.end(), [&](const TurnBind& tb) { return tb.key == code; });
         if (!bound) return;
-        if (!armed_) { say(keyName(code) + " pressed, but not armed: tick Armed at the top right"); return; }
+        if (!armed_) { say(keyName(code) + " pressed, but not armed: click the seal at the top right"); return; }
         if (s_.cVirtual < kLeastCalibration) { say(keyName(code) + " pressed, but not calibrated yet"); return; }
         if (phase_ != Phase::Idle) return;
         if (code == s_.boom.key) { startSpin(code, t); return; }
@@ -136,6 +153,7 @@ public:
         out_.log.clear();
         out_.captureSlot = -1;
         out_.newC = false;
+        out_.armedNew = false;
         return o;
     }
 

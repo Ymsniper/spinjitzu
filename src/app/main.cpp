@@ -79,6 +79,7 @@ static void worker(Bridge& b) {
             if (o.settings.mouse != wantMouse) { mouseNode.clear(); wantMouse = o.settings.mouse; hand = wantMouse; b.tellDevices(hand, problem, "", node); }
         }
         if (o.captureNew) core.capture(o.capture, monoNow());
+        if (o.armNew) core.arm(o.arm);
 
         std::vector<pollfd> pf;
         for (const Dev& d : devs) pf.push_back({d.fd, POLLIN, 0});
@@ -248,13 +249,14 @@ struct Ui {
         if (slot == kSlotTest) return &s.keyTest;
         if (slot == kSlotPanic) return &s.keyPanic;
         if (slot == kSlotBoomerang) return &s.boom.key;
+        if (slot == kSlotArm) return &s.keyArm;
         const int i = slot - kSlotTurn0;
         return i >= 0 && i < (int)s.turns.size() ? &s.turns[i].key : nullptr;
     }
     const char* slotName(int slot) {
         static std::string n;
         n = slot == kSlotCalibrate ? "hand 360" : slot == kSlotTest ? "test 360" : slot == kSlotPanic ? "panic"
-          : slot == kSlotBoomerang ? "boomerang" : "turn " + std::to_string(slot - kSlotTurn0 + 1);
+          : slot == kSlotBoomerang ? "boomerang" : slot == kSlotArm ? "arm" : "turn " + std::to_string(slot - kSlotTurn0 + 1);
         return n.c_str();
     }
     void changed() { dirty = true; changedAt = GetTime(); b.settings(s); }
@@ -285,6 +287,7 @@ struct Ui {
             }
         }
         if (sh.core.newC) { s.cHand = sh.core.cHand; s.cVirtual = sh.core.cVirtual; s.checked = sh.core.checked; changed(); }
+        if (sh.core.armedNew && sh.core.armed != s.armed) { s.armed = sh.core.armed; changed(); }
         if (!sh.mouse.empty() && sh.mouse != s.mouse) { s.mouse = sh.mouse; changed(); }
     }
 
@@ -312,19 +315,25 @@ struct Ui {
         const float side = 78, gap = 14, right = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
         const char* state = s.armed ? "Armed" : "Not armed";
         const char* means = s.armed ? "turn keys work" : "turn keys do nothing";
+        // The key that switches it from inside the game, bound right here.
+        const std::string key = capturing == kSlotArm ? "press a key..." : "arm key: " + keyName(s.keyArm);
         ImGui::PushFont(art.display, 21);
         const ImVec2 stateSize = ImGui::CalcTextSize(state);
         ImGui::PopFont();
         const ImVec2 meansSize = ImGui::CalcTextSize(means);
-        const float words = std::max(stateSize.x, meansSize.x);
+        const ImVec2 keySize(ImGui::CalcTextSize(key.c_str()).x + 16, ImGui::GetFrameHeight());
+        const float words = std::max({stateSize.x, meansSize.x, keySize.x});
         ImGui::SetCursorPos(ImVec2(right - side - gap - words, top.y + 2));
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        if (ImGui::InvisibleButton("armed", ImVec2(words + gap + side, side))) { s.armed = !s.armed; changed(); }
+        ImGui::SetNextItemAllowOverlap();
+        if (ImGui::InvisibleButton("armed", ImVec2(words + gap + side, side))) { s.armed = !s.armed; changed(); b.arm(s.armed); }
         if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float ty = p.y + side / 2 - (stateSize.y + meansSize.y) / 2;
+        const float ty = p.y + side / 2 - (stateSize.y + meansSize.y + 4 + keySize.y) / 2;
         dl->AddText(art.display, 21, ImVec2(p.x + words - stateSize.x, ty), ImGui::GetColorU32(s.armed ? kSeal : kInk), state);
         dl->AddText(ImVec2(p.x + words - meansSize.x, ty + stateSize.y), ImGui::GetColorU32(kInk), means);
+        ImGui::SetCursorScreenPos(ImVec2(p.x + words - keySize.x, ty + stateSize.y + meansSize.y + 4));
+        if (ImGui::Button((key + "##armkey").c_str(), keySize) && capturing < 0) { capturing = kSlotArm; b.capture(kSlotArm); }
         seal(art, ImVec2(p.x + words + gap, p.y), side, shownArmed, clock() - armedAt);
 
         ImGui::SetCursorPos(ImVec2(below.x, std::max(below.y, top.y + side + 6)));
@@ -499,6 +508,7 @@ int main(int argc, char** argv) {
     Bridge b;
     Ui ui(b, loadSettings(path), shot ? "" : path);
     b.settings(ui.s);
+    b.arm(ui.s.armed);
     std::thread w;
     if (!shot) w = std::thread(worker, std::ref(b));
 

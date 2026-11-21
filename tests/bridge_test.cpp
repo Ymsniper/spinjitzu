@@ -45,7 +45,6 @@ int main() {
     for (int frame = 0; got < kAsks && frame < 10'000'000; frame++) {
         s.speed = 30 + frame % 1000;
         b.settings(s);
-        s.armed = frame % 2;
         if (waiting < 0 && asked < kAsks) { waiting = asked % 7; b.capture(waiting); asked++; }
         const Shown sh = b.look();
         for (const std::string& l : sh.core.log) logs += l.rfind("pressed ", 0) == 0;
@@ -60,6 +59,49 @@ int main() {
     (void)stop;
     chk(got == kAsks && slotsRight, "every binding asked for comes back once, for the slot that asked");
     chk(logs == kAsks, "every log line arrives once");
+
+    // The arm key pressed an odd number of times in the worker while the
+    // window keeps sending settings it changed for other reasons: no press
+    // is lost or undone, and both sides end on the same state.
+    {
+        Bridge a;
+        const int kPresses = 2001;
+        std::atomic<bool> pressed{false};
+        bool coreArmed = false;
+        std::thread w([&] {
+            Core core;
+            Ns now = 0;
+            int done = 0;
+            while (true) {
+                const Bridge::Orders o = a.take();
+                if (o.quit) break;
+                if (o.settingsNew) core.use(o.settings);
+                now += kTick;
+                if (done < kPresses && (done > 0 || o.settingsNew)) {   // once the arm key is bound
+                    core.key(KEY_F6, 1, now); now += kTick; core.key(KEY_F6, 0, now);
+                    if (++done == kPresses) pressed = true;
+                }
+                core.tick(now);
+                const Core::Out out = core.take();
+                coreArmed = out.armed;
+                a.tell(out);
+            }
+        });
+        Settings s;
+        s.keyArm = KEY_F6;
+        a.settings(s);
+        for (int frame = 0; frame < 10'000'000; frame++) {
+            s.speed = 30 + frame % 1000;
+            a.settings(s);
+            const Shown sh = a.look();
+            if (sh.core.armedNew) s.armed = sh.core.armed;
+            if (pressed) break;
+        }
+        a.quit();
+        w.join();
+        if (const Shown sh = a.look(); sh.core.armedNew) s.armed = sh.core.armed;   // the last word, kept until looked at
+        chk(s.armed && coreArmed, "an odd number of arm key presses ends armed, in the window and in the worker");
+    }
     printf("%s (%d of %d failed)\n", g_bad ? "FAILED" : "all good", g_bad, g_n);
     return g_bad ? 1 : 0;
 }
