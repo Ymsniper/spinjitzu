@@ -41,9 +41,10 @@ static void worker(Bridge& b) {
     if (out < 0) problem = "Cannot make the virtual mouse (/dev/uinput). Run: sudo modprobe uinput, and add yourself to the uinput group.";
     else {
         // The desktop needs a moment to take the new device in; then our own
-        // device goes flat, so a turn's speed never changes its size.
+        // device goes flat, so a turn's speed never changes its size. Only
+        // KDE's way is tried here: elsewhere the Output tab shows the command.
         std::this_thread::sleep_for(std::chrono::seconds(1));
-        setProfile(node, true);
+        if (desktop() == Desktop::KdeWayland) setProfile(node, true);
     }
 
     Core core;
@@ -230,7 +231,11 @@ struct Ui {
     bool dirty = false;
     double changedAt = 0;
     int capturing = -1;
-    std::string accel;            // what KDE said, when asked
+    Desktop desk = desktop();
+    bool accelRead = false;
+    std::string accel, yours, flatCmd;   // what the desktop says of Spinjitzu's mouse and of yours; the command for flat
+    double copiedAt = -1e9;
+    int xValues = 3;              // how many profiles X's libinput has, once read
     std::vector<std::string> log;
     int forceTab = -1;            // --shot: the tab to draw
     double fixedClock = -1;       // --shot: the time to draw at
@@ -428,16 +433,36 @@ struct Ui {
     void outputTab(const Shown& sh) {
         ImGui::Text("Mouse read as your hand: %s", s.mouse.empty() ? "the first one you move" : s.mouse.c_str());
         if (!s.mouse.empty() && ImGui::Button("Use another: click, then move it")) { s.mouse.clear(); changed(); }
-        ImGui::Text("Turns go out through: Spinjitzu's virtual mouse (%s)", sh.virtualNode.c_str());
-        ImGui::Spacing();
-        // KDE is asked on the button, never every frame.
-        if (ImGui::Button("Read KDE's acceleration settings")) {
-            auto of = [](const std::string& n) { const std::string a = n.empty() ? "" : accelOf(n); return a.empty() ? std::string("not known") : a; };
-            accel = "your mouse: " + of(sh.mouseNode) + "; Spinjitzu's: " + of(sh.virtualNode);
+        ImGui::Text("Turns go out through: Spinjitzu's virtual mouse%s", sh.virtualNode.empty() ? "" : (" (" + sh.virtualNode + ")").c_str());
+        rule(1.4f, 5);
+        ImGui::PushFont(art.display, 19);
+        ImGui::TextUnformatted("Acceleration");
+        ImGui::PopFont();
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 600);
+        ImGui::Text("Desktop: %s", desktopName(desk));
+        // Asked once and on the button, never every frame: each ask runs a program.
+        const bool again = ImGui::Button("Read again");
+        if (again || (!accelRead && !sh.virtualNode.empty())) {
+            accelRead = true;
+            if (desk == Desktop::X11) accel = xinputProfile(run(std::string("xinput list-props 'pointer:") + kOwnName + "'"), &xValues);
+            else accel = profileOf(desk, sh.virtualNode, kOwnName, kOwnVendor, kOwnProduct);
+            yours = desk == Desktop::KdeWayland ? accelOf(sh.mouseNode) : "";
         }
-        if (!accel.empty()) ImGui::TextDisabled("%s", accel.c_str());
-        ImGui::TextDisabled("Spinjitzu sets its own virtual mouse to flat, so a turn's speed never changes its size.");
-        ImGui::Spacing();
+        flatCmd = flatCommand(desk, sh.virtualNode, kOwnName, kOwnVendor, kOwnProduct, xValues);
+        ImGui::Text("Spinjitzu's mouse: %s", accel.empty() ? "cannot be read here" : accel.c_str());
+        if (!yours.empty()) ImGui::Text("Your mouse: %s", yours.c_str());
+        if (desk == Desktop::KdeWayland) ImGui::TextDisabled("Spinjitzu sets its own mouse to flat when it starts.");
+        else if (!flatCmd.empty()) {
+            ImGui::TextUnformatted("To make it flat, run:");
+            ImGui::SetNextItemWidth(std::min(600.0f, ImGui::GetContentRegionAvail().x - 90));
+            ImGui::InputText("##flat", const_cast<char*>(flatCmd.c_str()), flatCmd.size() + 1, ImGuiInputTextFlags_ReadOnly);
+            ImGui::SameLine();
+            if (ImGui::Button(clock() - copiedAt < 1.5 ? "Copied" : "Copy")) { SetClipboardText(flatCmd.c_str()); copiedAt = clock(); }
+            if (desk == Desktop::Gnome) ImGui::TextColored(kSeal, "GNOME has one setting for every mouse: this makes yours flat too.");
+        } else ImGui::TextWrapped("Set the mouse named %s to flat in your desktop's mouse settings, if it has one.", kOwnName);
+        ImGui::TextDisabled("Whether your game sees acceleration at all: the speed check in Calibrate.");
+        ImGui::PopTextWrapPos();
+        rule(1.4f, 6);
         ImGui::Text("Panic key (stops everything)"); ImGui::SameLine(240); bindButton(kSlotPanic);
     }
 

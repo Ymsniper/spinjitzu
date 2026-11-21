@@ -13,7 +13,8 @@ CORE = "src/core.hpp"
 SETTINGS = "src/settings.hpp"
 THEME = "src/app/theme.hpp"
 BRIDGE = "src/bridge.hpp"
-TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp", "tests/bridge_test.cpp", "tests/theme_test.cpp"]
+DEVICES = "src/devices.hpp"
+TESTS = ["tests/engine_test.cpp", "tests/spike_test.cpp", "tests/core_test.cpp", "tests/bridge_test.cpp", "tests/theme_test.cpp", "tests/devices_test.cpp"]
 EVDEV = subprocess.run(["pkg-config", "--cflags", "--libs", "libevdev"], capture_output=True, text=True).stdout.split()
 
 BREAKS = [
@@ -155,6 +156,18 @@ BREAKS = [
     (CORE, "a speed check off the mark passes",
      "const bool landed = std::fabs((double)k) <= tolerance();",
      "const bool landed = true;"),
+    (DEVICES, "KDE on X11 is sent to KWin",
+     "    if (session == \"x11\") return Desktop::X11;\n    if (current.find(\"KDE\") != std::string::npos) return Desktop::KdeWayland;",
+     "    if (current.find(\"KDE\") != std::string::npos) return Desktop::KdeWayland;\n    if (session == \"x11\") return Desktop::X11;"),
+    (DEVICES, "Sway's name keeps the spaces",
+     "    for (char& c : name) if (c == ' ') c = '_';\n",
+     ""),
+    (DEVICES, "the xinput command always sets three profiles",
+     "(xinputValues > 2 ? \" 0\" : \"\")",
+     "\" 0\""),
+    (DEVICES, "Sway's profile is read off the first input listed",
+     "size_t p = json.find(\"\\\"accel_profile\\\"\", at);",
+     "size_t p = json.find(\"\\\"accel_profile\\\"\");"),
     (THEME, "the ink fades to a grey nobody can read",
      "constexpr Rgb kSumi{0x2A, 0x21, 0x19};",
      "constexpr Rgb kSumi{0x8A, 0x81, 0x79};"),
