@@ -196,29 +196,24 @@ inline void drawScroll(const Texture2D& paper, float w, float h) {
 
 // ── brush work ────────────────────────────────────────────────────────────────
 
-// A brush stroke from a to b: pressed hardest early, lifting off at both
-// ends, with a waver that stays put from frame to frame for the same seed.
-inline void brush(ImDrawList* dl, ImVec2 a, ImVec2 b, float thick, ImU32 col, uint32_t seed) {
-    const float len = std::hypot(b.x - a.x, b.y - a.y);
-    if (len < 2) return;
-    const int n = std::clamp((int)(len / 4), 12, 240);
-    const ImVec2 d((b.x - a.x) / len, (b.y - a.y) / len), nrm(-d.y, d.x);
-    const float ph1 = unit(seed) * 6.28f, ph2 = unit(seed + 1) * 6.28f;
+// Ink along `pts`, `w[i]` wide at each point: one strip of four rows, a
+// one-pixel fade on each side of the ink as ImGui draws its own lines, so
+// the stroke has no seams.
+inline void stroke(ImDrawList* dl, const std::vector<ImVec2>& pts, const std::vector<float>& w, ImU32 col) {
+    const int n = (int)pts.size() - 1;
+    if (n < 1) return;
     const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
     const unsigned alpha = (col >> IM_COL32_A_SHIFT) & 0xff;
-    // One strip, four rows: a one-pixel fade on each side of the ink, as
-    // ImGui draws its own lines, so the stroke has no seams.
+    const ImU32 clear = col & ~IM_COL32_A_MASK;
     dl->PrimReserve(n * 18, (n + 1) * 4);
     const ImDrawIdx base = (ImDrawIdx)dl->_VtxCurrentIdx;
     for (int i = 0; i <= n; i++) {
-        const float t = (float)i / n;
-        const float w = thick * std::max(0.08f, std::pow(std::sin(3.14159f * std::pow(t, 0.7f)), 0.55f));
-        const float wob = 0.14f * thick * std::sin(t * 7.5f + ph1) + 0.08f * thick * std::sin(t * 17.0f + ph2);
-        const ImVec2 p(a.x + (b.x - a.x) * t + nrm.x * wob, a.y + (b.y - a.y) * t + nrm.y * wob);
-        const float in = std::max(0.0f, w / 2 - 0.5f), out = in + 1.0f;
+        const ImVec2 a = pts[std::max(i - 1, 0)], b = pts[std::min(i + 1, n)];
+        const float len = std::max(1e-4f, std::hypot(b.x - a.x, b.y - a.y));
+        const ImVec2 nrm(-(b.y - a.y) / len, (b.x - a.x) / len), p = pts[i];
+        const float in = std::max(0.0f, w[i] / 2 - 0.5f), out = in + 1.0f;
         // Thinner than a pixel: lighter, not narrower.
-        const ImU32 c = (col & ~IM_COL32_A_MASK) | ((ImU32)(alpha * std::min(1.0f, w)) << IM_COL32_A_SHIFT);
-        const ImU32 clear = col & ~IM_COL32_A_MASK;
+        const ImU32 c = clear | ((ImU32)(alpha * std::min(1.0f, w[i])) << IM_COL32_A_SHIFT);
         dl->PrimWriteVtx(ImVec2(p.x + nrm.x * out, p.y + nrm.y * out), uv, clear);
         dl->PrimWriteVtx(ImVec2(p.x + nrm.x * in, p.y + nrm.y * in), uv, c);
         dl->PrimWriteVtx(ImVec2(p.x - nrm.x * in, p.y - nrm.y * in), uv, c);
@@ -230,6 +225,55 @@ inline void brush(ImDrawList* dl, ImVec2 a, ImVec2 b, float thick, ImU32 col, ui
             dl->PrimWriteIdx(p0 + r); dl->PrimWriteIdx(q0 + r); dl->PrimWriteIdx(q0 + r + 1);
             dl->PrimWriteIdx(p0 + r); dl->PrimWriteIdx(q0 + r + 1); dl->PrimWriteIdx(p0 + r + 1);
         }
+    }
+}
+
+// A brush stroke from a to b: pressed hardest early, lifting off at both
+// ends, with a waver that stays put from frame to frame for the same seed.
+inline void brush(ImDrawList* dl, ImVec2 a, ImVec2 b, float thick, ImU32 col, uint32_t seed) {
+    const float len = std::hypot(b.x - a.x, b.y - a.y);
+    if (len < 2) return;
+    const int n = std::clamp((int)(len / 4), 12, 240);
+    const ImVec2 nrm(-(b.y - a.y) / len, (b.x - a.x) / len);
+    const float ph1 = unit(seed) * 6.28f, ph2 = unit(seed + 1) * 6.28f;
+    std::vector<ImVec2> pts;
+    std::vector<float> w;
+    for (int i = 0; i <= n; i++) {
+        const float t = (float)i / n;
+        const float wob = 0.14f * thick * std::sin(t * 7.5f + ph1) + 0.08f * thick * std::sin(t * 17.0f + ph2);
+        pts.push_back(ImVec2(a.x + (b.x - a.x) * t + nrm.x * wob, a.y + (b.y - a.y) * t + nrm.y * wob));
+        w.push_back(thick * std::max(0.08f, std::pow(std::sin(3.14159f * std::pow(t, 0.7f)), 0.55f)));
+    }
+    stroke(dl, pts, w, col);
+}
+
+// An ensō for a turn: one brush circle from the top, round the way the turn
+// goes (clockwise is right), as far as it goes; `done` of it drawn so far.
+// A whole turn stays open where the brush lifted; more than one says how
+// many inside.
+inline void enso(ImDrawList* dl, ImVec2 c, float r, double degrees, float thick, ImU32 col, uint32_t seed,
+                 double done = 1, double fromDeg = -90) {
+    const double dir = degrees < 0 ? -1 : 1, whole = std::fabs(degrees);
+    const double sweep = std::min(whole, 348.0) * std::clamp(done, 0.0, 1.0);
+    if (sweep < 1) return;
+    const int n = std::max(10, (int)(sweep / 4));
+    const float ph = unit(seed) * 6.28f;
+    std::vector<ImVec2> pts;
+    std::vector<float> w;
+    for (int i = 0; i <= n; i++) {
+        const float t = (float)i / n;
+        const double a = (fromDeg + dir * sweep * t) * 3.14159265 / 180;
+        const float rr = r * (1 + 0.035f * std::sin(t * 5.0f + ph));
+        pts.push_back(ImVec2(c.x + (float)std::cos(a) * rr, c.y + (float)std::sin(a) * rr));
+        w.push_back(thick * (0.25f + 0.75f * std::pow(1 - t, 0.5f)));   // lands heavy, lifts thin
+    }
+    stroke(dl, pts, w, col);
+    dl->AddCircleFilled(pts[0], thick * 0.55f, col);
+    if (whole > 360.0005 && done >= 1) {
+        char b[16];
+        snprintf(b, sizeof b, "%.3gx", whole / 360);
+        const ImVec2 sz = ImGui::CalcTextSize(b);
+        dl->AddText(ImVec2(c.x - sz.x / 2, c.y - sz.y / 2), col, b);
     }
 }
 

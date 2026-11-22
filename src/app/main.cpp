@@ -397,6 +397,10 @@ struct Ui {
             TurnBind& t = s.turns[i];
             ImGui::PushID((int)i);
             if (i) rule(1.4f, 10 + (uint32_t)i);
+            // The turn drawn as an ensō at the right of its row.
+            const ImVec2 row = ImGui::GetCursorScreenPos(), c(row.x + ImGui::GetContentRegionAvail().x - 30, row.y + 30);
+            ImGui::GetWindowDrawList()->AddCircle(c, 21, ImGui::GetColorU32(col(theme::kSumi, 0.16f)), 48, 1.0f);   // the whole turn, faint
+            enso(ImGui::GetWindowDrawList(), c, 21, t.degrees * (t.dir < 0 ? -1 : 1), 3.4f, ImGui::GetColorU32(kInk), 20 + (uint32_t)i);
             bindButton(kSlotTurn0 + (int)i);
             ImGui::SameLine();
             int dir = t.dir < 0 ? 0 : 1;
@@ -469,6 +473,14 @@ struct Ui {
     void footer(const Shown& sh) {
         const Core::Last& l = sh.core.last;
         rule(2.6f, 4);
+        // The turn under way, drawn as it goes out; a boomerang, spinning.
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const ImVec2 c(at.x + 11, at.y + ImGui::GetTextLineHeight() / 2);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        if (sh.core.doing == "boomerang") enso(dl, c, 9, 300, 2.6f, ImGui::GetColorU32(kInk), 9, 1, std::fmod(clock() * 540, 360));
+        else if (l.any) enso(dl, c, 9, (double)l.milli / kMilli, 2.6f, ImGui::GetColorU32(l.stopped ? kSeal : kInk), 8,
+                             l.counts ? (double)l.sent / (double)l.counts : 1);
+        if (l.any || sh.core.doing == "boomerang") { ImGui::Dummy(ImVec2(24, 0)); ImGui::SameLine(); }
         if (!l.any) { ImGui::TextDisabled("no turn yet"); return; }
         ImGui::Text("last turn: %.3f degrees, %lld counts", (double)l.milli / kMilli, (long long)l.counts);
         ImGui::SameLine();
