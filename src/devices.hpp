@@ -82,6 +82,17 @@ inline void heldKeys(int fd, unsigned long (&held)[KEY_MAX / (8 * sizeof(long)) 
 // A key or button as people know it: F8, not KEY_F8.
 inline std::string keyName(int code) {
     if (code <= 0) return "none";
+    // Mouse buttons as games name them: the side buttons are Mouse 4 (back)
+    // and Mouse 5 (forward).
+    switch (code) {
+    case BTN_LEFT: return "Mouse left";
+    case BTN_RIGHT: return "Mouse right";
+    case BTN_MIDDLE: return "Mouse middle";
+    case BTN_SIDE: return "Mouse 4";
+    case BTN_EXTRA: return "Mouse 5";
+    case BTN_FORWARD: return "Mouse forward";
+    case BTN_BACK: return "Mouse back";
+    }
     const char* n = libevdev_event_code_get_name(EV_KEY, code);
     if (!n) return "key " + std::to_string(code);
     const std::string s = n;

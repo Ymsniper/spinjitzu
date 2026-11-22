@@ -50,6 +50,10 @@ int main() {
         "KDE's command names our device node");
     chk(flatCommand(Desktop::Other, "event9", "spinjitzu", kOwnVendor, kOwnProduct).empty(), "no command for a desktop not known");
 
+    chk(keyName(BTN_SIDE) == "Mouse 4" && keyName(BTN_EXTRA) == "Mouse 5" && keyName(KEY_F8) == "F8" && keyName(0) == "none" &&
+            codeName(BTN_SIDE) == "BTN_SIDE",
+        "keys shown as people know them, mouse side buttons as games name them; the file keeps the kernel's names");
+
     printf("%s (%d of %d failed)\n", g_bad ? "FAILED" : "all good", g_bad, g_n);
     return g_bad ? 1 : 0;
 }
