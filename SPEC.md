@@ -39,6 +39,15 @@ tool's `C` covered `360 * (1 - k / C_hand)` degrees, so its new value is
 until a turn lands where it started. The menu refuses a turn with no
 calibration.
 
+**Speed check.** Once a test lands and says checked, the test key turns the
+same `C` four times as fast. If the game turns the view by the counts alone,
+it lands on the mark again; if it lands off, the game sees acceleration on the
+virtual mouse, and a calibration taken at one speed is wrong at every other. The
+correction is only reported (by how many counts), never applied: `C` stays as
+it was. This works on any desktop and in any game, where reading the
+desktop's settings cannot tell whether the game reads raw or accelerated
+motion.
+
 Converting the hand's counts to the virtual mouse's counts uses
 `C_virtual / C_hand`, carrying the remainder.
 
@@ -110,6 +119,27 @@ boomerang the hand's counts are added to the net (section 6).
   also reaches the game, so bind keys the game does not use.
 - A press while a turn runs is ignored. Key repeat is ignored. Two binds at
   once: the first one wins.
+- Left click cannot be bound: it fires in every game and clicks the window.
+  Esc cancels a capture. One key binds one thing; the menu refuses a clash.
+- **Armed**: turn and boomerang keys work only while armed. An arm key
+  (unbound at first) switches it from inside the game. Not armed, a turn key
+  says why in the log.
+
+## 7a. Desktops
+
+- The window runs on any desktop (raylib over GLFW, X11, XWayland on
+  Wayland). What differs is the pointer acceleration the desktop puts on the
+  tool's own mouse.
+- KDE on Wayland: the tool sets its mouse flat through KWin when it starts.
+- X11 sessions (KDE on X11 too), Sway, Hyprland: the profile is read where it
+  can be (`xinput`, `swaymsg`) and the command that makes the tool's mouse
+  flat is shown, to copy and run. A desktop is set by the tool only once its
+  command is confirmed there.
+- GNOME has one setting for every mouse: it is read and its command shown
+  with that warning, never run by the tool.
+- Others: the tool says it does not know the desktop.
+- Whatever the desktop, the speed check (section 2) says whether the game
+  sees acceleration at all.
 
 ## 7b. Who runs what
 
@@ -117,6 +147,10 @@ boomerang the hand's counts are added to the net (section 6).
   devices, steps the engine on a 1 ms timer while something turns, and
   sends. The window is another thread; it hands over settings and commands
   and reads what the worker says, through one lock held only to copy.
+- Armed goes to the worker as its own order, never inside settings: settings
+  sent before the window heard of an arm key press would put the old state
+  back. The worker tells every change of Armed back, and an untold change is
+  kept until the window looks.
 - Input is checked where it enters: degrees beyond 1000 turns or not a
   number are refused, speed and jitter are held to their ranges, a `C` under
   the calibration floor is refused.
@@ -136,24 +170,56 @@ boomerang the hand's counts are added to the net (section 6).
 
 - `src/engine.hpp`: everything in sections 2 to 6 that has no device in it:
   calibration, targets, curves, jitter, boomerang. Tested offline.
-- `src/input`: device discovery, bind capture, raw `REL_X` reader.
-- `src/out`: the virtual mouse the turns go out through.
-- `src/ui`: the menu, a separate window (raylib + Dear ImGui).
-- Profiles in `~/.config/spinjitzu/<profile>.cfg`, `key = value`.
+- `src/core.hpp`: the app with no window and no device: binds, calibration
+  and the speed check, turns, boomerang, Armed and the arm key, panic.
+- `src/settings.hpp`: the settings file. `src/bridge.hpp`: the one lock
+  between the window and the worker.
+- `src/devices.hpp`: device discovery, the raw reader, the `uinput` mouse,
+  key names, the desktop and its acceleration.
+- `src/app`: the window (raylib + Dear ImGui) and the worker. `theme.hpp`:
+  the colours, free of any library so a check can hold them to contrast.
+  `scroll.hpp`: the fonts, the logo, the paper, the frame, the brush, the
+  seal, the ensō and the opening.
+- `assets/`: Shojumaru (OFL, shipped unchanged, reserved name), a Noto Serif
+  CJK JP subset (OFL), the Sensei, each font with its licence beside it. They
+  are carried inside the binary.
+- Settings in `~/.config/spinjitzu/spinjitzu.cfg`, `key = value`.
 
 ## 10. Menu
 
-A header always shows the profile, its `C` with a calibrated or stale
-badge, an armed switch and the panic key. A footer
-shows the last turn: degrees asked, counts sent, and how far off that is.
+The window is a handscroll (makimono) of ink on washi: a wooden roller at the
+left, an indigo brocade cover at the right, brush strokes for rules. Colours
+are six named tokens (paper, ink, cinnabar, gold, indigo, wood); every pair
+that carries text meets WCAG contrast, ink 7:1, the rest 4.5:1, on the
+darkest the paper may get under text. Every control has an ink border.
+Shojumaru sets the title and the tabs; the Noto subset sets the rest and
+スピン術. Cinnabar is kept for the seal, errors and the open tab's stroke.
 
-- **Calibrate**: steps 1 to 3 above, with a live counter; Test 360 and Test 90.
-  Other tabs are greyed out until the profile is calibrated.
-- **Turns**: one row per bind: key, degrees, direction, speed
-  and jitter overrides. "+ Add turn".
+- **Opening**: the scroll lies tied shut at the right, in its brocade with
+  the gold Sensei and a スピン術 title slip, then unrolls right to left, the
+  way a handscroll is read, until the roller is left (about 1.1 s). Any key or
+  click skips it and reaches no control; a desktop set to no animation (KDE's
+  speed at 0, GNOME's switch off) never sees it.
+- **Header**: the Sensei in ink, the title, `C` by hand and virtual with
+  checked or not, what the tool is doing. At the right, Armed as a seal:
+  cinnabar with スピン術 cut out in white when armed (it stamps on), an empty
+  frame in full ink when not (never faint), the words beside it, and the arm
+  key's bind. The window's title says armed or not, for the taskbar.
+- **Calibrate**: the steps, the hand 360 and test keys, the speed check's
+  result, a live counter, the log.
+- **Turns**: one row per bind: key, direction, degrees, its own speed and
+  jitter or the defaults, and an ensō: a brush circle from the top, as far as
+  the turn goes and round its way, "2x" inside for two turns. "+ Add turn".
 - **Boomerang**: bind, direction, spin speed, finish.
 - **Motion**: default speed, curve and jitter.
-- **Output**: which mouse is read, the panic key.
+- **Output**: which mouse is read, the desktop and its
+  acceleration (section 7a), the panic key.
+- **Footer**: the last turn, its degrees and counts, "stopped: N of M" when
+  cut short, and an ensō drawing the turn as it goes out; spinning during a
+  boomerang.
+- `spinjitzu --shot out.png <tab> [seconds] [armed]` draws the window off
+  screen into a picture, at a set time of the opening, without opening any
+  device or writing the settings.
 
 ## 11. Checks
 
@@ -164,7 +230,15 @@ Offline, before anyone plays:
   tick and during the finish.
 - Calibration with overshoot, correction, either direction, vertical noise,
   and a refused near-zero result.
-- Each check broken on purpose once, to show it can fail.
+- The speed check: it runs four times as fast, reports landed or off by how
+  much, and leaves the settings exactly as they were.
+- The arm key: it switches, never turns, binds while a capture waits, and no
+  press is lost or undone between the threads.
+- Every colour pair that carries text, held to its contrast.
+- Every character in the source's strings is in the fonts (`tests/glyphs.py`).
+- The desktop: which one it is from the environment, what `xinput` and
+  `swaymsg` say, and each desktop's command.
+- Each check broken on purpose once, to show it can fail (`tests/breaks.py`).
 - The threads under the thread sanitizer.
 
 One live check by the user, in a practice area: press the 360 bind 20 times;
