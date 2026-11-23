@@ -43,7 +43,7 @@ int main() {
     Settings s;
     int waiting = -1;
     for (int frame = 0; got < kAsks && frame < 10'000'000; frame++) {
-        s.speed = 30 + frame % 1000;
+        s.game.speed = 30 + frame % 1000;
         b.settings(s);
         if (waiting < 0 && asked < kAsks) { waiting = asked % 7; b.capture(waiting); asked++; }
         const Shown sh = b.look();
@@ -104,7 +104,7 @@ int main() {
         s.keyArm = KEY_F6;
         a.settings(s);
         for (int frame = 0; frame < 10'000'000; frame++) {
-            s.speed = 30 + frame % 1000;
+            s.game.speed = 30 + frame % 1000;
             a.settings(s);
             const Shown sh = a.look();
             if (sh.core.armedNew) s.armed = sh.core.armed;

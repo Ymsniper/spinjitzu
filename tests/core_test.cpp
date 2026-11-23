@@ -25,7 +25,7 @@ struct Rig {
     void drain() {
         Core::Out o = c.take();
         for (auto& l : o.log) log.push_back(l);
-        if (o.newC) { s.cHand = o.cHand; s.cVirtual = o.cVirtual; s.checked = o.checked; c.use(s); }
+        if (o.newC) { s.game.cHand = o.cHand; s.game.cVirtual = o.cVirtual; s.game.checked = o.checked; c.use(s); }
         if (o.armedNew) s.armed = o.armed;   // as the window does
     }
     void press(int k) { now += 10 * kTick; c.key(k, 1, now); now += 10 * kTick; c.key(k, 0, now); drain(); }
@@ -47,12 +47,12 @@ int main() {
     {
         Rig r;
         r.calibrate(16000);
-        chk(r.s.cHand == 16000 && r.s.cVirtual == 16000 && !r.s.checked, "a hand 360 gives C, and the virtual mouse starts from it, not checked yet");
+        chk(r.s.game.cHand == 16000 && r.s.game.cVirtual == 16000 && !r.s.game.checked, "a hand 360 gives C, and the virtual mouse starts from it, not checked yet");
         r.press(r.s.keyTest);
         r.run();
         chk(r.sent == 16000, "the test 360 sends the virtual mouse's C");
         r.press(r.s.keyCalibrate);
-        chk(r.s.checked && r.s.cVirtual == 16000, "landed on the mark: checked");
+        chk(r.s.game.checked && r.s.game.cVirtual == 16000, "landed on the mark: checked");
     }
     {
         Rig r;
@@ -61,14 +61,14 @@ int main() {
         r.run();
         for (int i = 0; i < 4; i++) r.hand(40);   // fell 160 counts short: corrected by hand
         r.press(r.s.keyCalibrate);
-        chk(r.s.cVirtual == 16162 && !r.s.checked, "short by 1%: the virtual mouse's C grows by 1 / 0.99, and needs another test");
+        chk(r.s.game.cVirtual == 16162 && !r.s.game.checked, "short by 1%: the virtual mouse's C grows by 1 / 0.99, and needs another test");
     }
     {
         Rig r;
         r.press(r.s.keyTest);
         chk(r.said("do a hand 360 first") && r.c.idle(), "a test before any hand 360 is refused");
         r.calibrate(150);
-        chk(r.said("too small") && r.s.cHand == 0, "a hand turn of 150 counts is refused");
+        chk(r.said("too small") && r.s.game.cHand == 0, "a hand turn of 150 counts is refused");
     }
 
     // ── the speed check ─────────────────────────────────────────────────────
@@ -127,12 +127,12 @@ int main() {
         TurnBind t;
         t.key = KEY_E;
         t.degrees = 90;
-        r.s.turns.push_back(t);
+        r.s.game.turns.push_back(t);
         TurnBind back;
         back.key = KEY_Q;
         back.degrees = 0.18;
         back.dir = -1;
-        r.s.turns.push_back(back);
+        r.s.game.turns.push_back(back);
         r.c.use(r.s);
         r.c.arm(true);
     };
@@ -224,7 +224,7 @@ int main() {
         r.s.keyArm = KEY_F6; r.c.use(r.s);
         r.now += kTick; r.c.key(KEY_F6, 1, r.now); r.now += kTick; r.c.key(KEY_F6, 0, r.now);
         Settings stale = r.s;                // sent before the window heard of the press
-        stale.speed = 999;
+        stale.game.speed = 999;
         r.c.use(stale);
         r.press(KEY_E); r.run();
         chk(r.sent == 0 && !r.s.armed, "settings sent before the window heard of the arm key do not undo it");
@@ -269,8 +269,8 @@ int main() {
     {
         Rig r;
         r.calibrate(16000);
-        r.s.boom.key = KEY_R;
-        r.s.boom.speed = 1440;
+        r.s.game.boom.key = KEY_R;
+        r.s.game.boom.speed = 1440;
         r.c.use(r.s);
         r.c.arm(true);
         r.now += kTick; r.c.key(KEY_R, 1, r.now);
@@ -294,7 +294,7 @@ int main() {
     {
         Rig r;
         r.calibrate(16000);
-        r.s.boom.key = KEY_R;
+        r.s.game.boom.key = KEY_R;
         r.c.use(r.s);
         r.c.arm(true);
         r.now += kTick; r.c.key(KEY_R, 1, r.now);
@@ -309,28 +309,28 @@ int main() {
         Settings s;
         s.keyCalibrate = BTN_EXTRA;
         s.keyArm = KEY_F6;
-        s.cHand = 16384;
-        s.cVirtual = 16511;
-        s.checked = true;
-        s.speed = 1234.5;
-        s.jitter = 7.25;
-        s.curve = Curve::Constant;
+        s.game.cHand = 16384;
+        s.game.cVirtual = 16511;
+        s.game.checked = true;
+        s.game.speed = 1234.5;
+        s.game.jitter = 7.25;
+        s.game.curve = Curve::Constant;
         s.mouse = "E-Signal AQIRYS Polaris Wired Gaming Mouse";
-        s.boom = {KEY_R, -1, 999.5, true, Finish::Shortest};
-        s.turns.push_back({KEY_E, 7.5, -1, true, 333, Curve::Constant, 12});
-        s.turns.push_back({BTN_SIDE, 180, 1, false, 720, Curve::Smooth, 0});
+        s.game.boom = {KEY_R, -1, 999.5, true, Finish::Shortest};
+        s.game.turns.push_back({KEY_E, 7.5, -1, true, 333, Curve::Constant, 12});
+        s.game.turns.push_back({BTN_SIDE, 180, 1, false, 720, Curve::Smooth, 0});
         const Settings b = fromText(toText(s));
-        chk(b.keyCalibrate == BTN_EXTRA && b.keyArm == KEY_F6 && fromText("").keyArm == 0 && b.cHand == 16384 && b.cVirtual == 16511 && b.checked && b.speed == 1234.5 &&
-                b.jitter == 7.25 && b.curve == Curve::Constant && b.mouse == s.mouse && b.boom.key == KEY_R &&
-                b.boom.dir == -1 && b.boom.speed == 999.5 && b.boom.finish == Finish::Shortest && b.turns.size() == 2 &&
-                b.turns[0].key == KEY_E && b.turns[0].degrees == 7.5 && b.turns[0].dir == -1 && b.turns[0].own &&
-                b.turns[0].speed == 333 && b.turns[0].jitter == 12 && b.turns[1].key == BTN_SIDE,
+        chk(b.keyCalibrate == BTN_EXTRA && b.keyArm == KEY_F6 && fromText("").keyArm == 0 && b.game.cHand == 16384 && b.game.cVirtual == 16511 && b.game.checked && b.game.speed == 1234.5 &&
+                b.game.jitter == 7.25 && b.game.curve == Curve::Constant && b.mouse == s.mouse && b.game.boom.key == KEY_R &&
+                b.game.boom.dir == -1 && b.game.boom.speed == 999.5 && b.game.boom.finish == Finish::Shortest && b.game.turns.size() == 2 &&
+                b.game.turns[0].key == KEY_E && b.game.turns[0].degrees == 7.5 && b.game.turns[0].dir == -1 && b.game.turns[0].own &&
+                b.game.turns[0].speed == 333 && b.game.turns[0].jitter == 12 && b.game.turns[1].key == BTN_SIDE,
             "settings read back exactly as written");
         const Settings bad = fromText("c_hand = abc\nspeed = nan\njitter = 99\nturn = KEY_E 1e12 1 own 720 smooth 0\nturn = KEY_Q\ncalibrate = KEY_NOTHING\n");
-        chk(bad.cHand == 0 && bad.speed == 720 && bad.jitter == kMostJitter && bad.turns.empty() && bad.keyCalibrate == KEY_F8,
+        chk(bad.game.cHand == 0 && bad.game.speed == 720 && bad.game.jitter == kMostJitter && bad.game.turns.empty() && bad.keyCalibrate == KEY_F8,
             "a broken file: what does not parse keeps its default, out of range is held to range");
         const std::string p = "/tmp/spinjitzu_core_test.cfg";
-        chk(saveSettings(p, s) && loadSettings(p).cVirtual == 16511 && loadSettings("/nonexistent/x.cfg").cHand == 0,
+        chk(saveSettings(p, s) && loadSettings(p).game.cVirtual == 16511 && loadSettings("/nonexistent/x.cfg").game.cHand == 0,
             "settings saved and loaded from a file; a missing file gives the defaults");
         remove(p.c_str());
     }

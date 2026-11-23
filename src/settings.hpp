@@ -33,18 +33,25 @@ struct BoomBind {
     Finish finish = Finish::Forward;
 };
 
-struct Settings {
-    int keyCalibrate = KEY_F8, keyTest = KEY_F9, keyPanic = KEY_PAUSE;
-    int keyArm = 0;               // switches Armed from inside the game; none at first
+// What belongs to one game, kept per profile: each game turns by its own
+// counts. A struct of its own, so a field added later is plainly one or the
+// other and a profile switch moves all of it at once.
+struct Game {
     int64_t cHand = 0, cVirtual = 0;
     bool checked = false;         // a test 360 through the virtual mouse landed on the mark
-    bool armed = false;           // turn and boomerang keys work
     double speed = 720;
     Curve curve = Curve::Smooth;
     double jitter = 0;
     std::vector<TurnBind> turns;
     BoomBind boom;
+};
+
+struct Settings {
+    int keyCalibrate = KEY_F8, keyTest = KEY_F9, keyPanic = KEY_PAUSE;
+    int keyArm = 0;               // switches Armed from inside the game; none at first
+    bool armed = false;           // turn and boomerang keys work
     std::string mouse;            // the mouse read as the hand, by name; empty: the first that moves
+    Game game;                    // the profile in use
 };
 
 inline std::string num(double v) {
@@ -68,17 +75,17 @@ inline std::string toText(const Settings& s) {
     o += "test = " + codeName(s.keyTest) + "\n";
     o += "panic = " + codeName(s.keyPanic) + "\n";
     o += "arm = " + codeName(s.keyArm) + "\n";
-    o += "c_hand = " + std::to_string(s.cHand) + "\n";
-    o += "c_virtual = " + std::to_string(s.cVirtual) + "\n";
-    o += std::string("checked = ") + (s.checked ? "1" : "0") + "\n";
+    o += "c_hand = " + std::to_string(s.game.cHand) + "\n";
+    o += "c_virtual = " + std::to_string(s.game.cVirtual) + "\n";
+    o += std::string("checked = ") + (s.game.checked ? "1" : "0") + "\n";
     o += std::string("armed = ") + (s.armed ? "1" : "0") + "\n";
-    o += "speed = " + num(s.speed) + "\n";
-    o += std::string("curve = ") + curve(s.curve) + "\n";
-    o += "jitter = " + num(s.jitter) + "\n";
+    o += "speed = " + num(s.game.speed) + "\n";
+    o += std::string("curve = ") + curve(s.game.curve) + "\n";
+    o += "jitter = " + num(s.game.jitter) + "\n";
     o += "mouse = " + s.mouse + "\n";
-    o += "boomerang = " + codeName(s.boom.key) + " " + std::to_string(s.boom.dir) + " " + num(s.boom.speed) + " " +
-         (s.boom.letThrough ? "through" : "block") + " " + (s.boom.finish == Finish::Forward ? "forward" : "shortest") + "\n";
-    for (const TurnBind& t : s.turns)
+    o += "boomerang = " + codeName(s.game.boom.key) + " " + std::to_string(s.game.boom.dir) + " " + num(s.game.boom.speed) + " " +
+         (s.game.boom.letThrough ? "through" : "block") + " " + (s.game.boom.finish == Finish::Forward ? "forward" : "shortest") + "\n";
+    for (const TurnBind& t : s.game.turns)
         o += "turn = " + codeName(t.key) + " " + num(t.degrees) + " " + std::to_string(t.dir) + " " + (t.own ? "own" : "default") +
              " " + num(t.speed) + " " + curve(t.curve) + " " + num(t.jitter) + "\n";
     return o;
@@ -119,20 +126,20 @@ inline Settings fromText(const std::string& text) {
         else if (k == "test") { if (int x = codeOf(v)) s.keyTest = x; }
         else if (k == "panic") { if (int x = codeOf(v)) s.keyPanic = x; }
         else if (k == "arm") s.keyArm = codeOf(v);
-        else if (k == "c_hand") c(v, s.cHand);
-        else if (k == "c_virtual") c(v, s.cVirtual);
-        else if (k == "checked") s.checked = v == "1";
+        else if (k == "c_hand") c(v, s.game.cHand);
+        else if (k == "c_virtual") c(v, s.game.cVirtual);
+        else if (k == "checked") s.game.checked = v == "1";
         else if (k == "armed") s.armed = v == "1";
-        else if (k == "speed") { if (numIn(v, d)) s.speed = speedIn(d); }
-        else if (k == "curve") s.curve = v == "constant" ? Curve::Constant : Curve::Smooth;
-        else if (k == "jitter") { if (numIn(v, d)) s.jitter = jitterIn(d); }
+        else if (k == "speed") { if (numIn(v, d)) s.game.speed = speedIn(d); }
+        else if (k == "curve") s.game.curve = v == "constant" ? Curve::Constant : Curve::Smooth;
+        else if (k == "jitter") { if (numIn(v, d)) s.game.jitter = jitterIn(d); }
         else if (k == "mouse") s.mouse = v;
         else if (k == "boomerang" && w.size() == 5) {
-            s.boom.key = codeOf(w[0]);
-            s.boom.dir = w[1] == "-1" ? -1 : 1;
-            if (numIn(w[2], d)) s.boom.speed = speedIn(d);
-            s.boom.letThrough = w[3] != "block";
-            s.boom.finish = w[4] == "shortest" ? Finish::Shortest : Finish::Forward;
+            s.game.boom.key = codeOf(w[0]);
+            s.game.boom.dir = w[1] == "-1" ? -1 : 1;
+            if (numIn(w[2], d)) s.game.boom.speed = speedIn(d);
+            s.game.boom.letThrough = w[3] != "block";
+            s.game.boom.finish = w[4] == "shortest" ? Finish::Shortest : Finish::Forward;
         } else if (k == "turn" && w.size() == 7) {
             TurnBind t;
             t.key = codeOf(w[0]);
@@ -143,7 +150,7 @@ inline Settings fromText(const std::string& text) {
             if (numIn(w[4], d)) t.speed = speedIn(d);
             t.curve = w[5] == "constant" ? Curve::Constant : Curve::Smooth;
             if (numIn(w[6], d)) t.jitter = jitterIn(d);
-            s.turns.push_back(t);
+            s.game.turns.push_back(t);
         }
     }
     return s;

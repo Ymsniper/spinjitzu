@@ -253,10 +253,10 @@ struct Ui {
         if (slot == kSlotCalibrate) return &s.keyCalibrate;
         if (slot == kSlotTest) return &s.keyTest;
         if (slot == kSlotPanic) return &s.keyPanic;
-        if (slot == kSlotBoomerang) return &s.boom.key;
+        if (slot == kSlotBoomerang) return &s.game.boom.key;
         if (slot == kSlotArm) return &s.keyArm;
         const int i = slot - kSlotTurn0;
-        return i >= 0 && i < (int)s.turns.size() ? &s.turns[i].key : nullptr;
+        return i >= 0 && i < (int)s.game.turns.size() ? &s.game.turns[i].key : nullptr;
     }
     const char* slotName(int slot) {
         static std::string n;
@@ -285,13 +285,13 @@ struct Ui {
             capturing = -1;
             if (code > 0) {
                 int clash = -1;
-                for (int other = 0; other < kSlotTurn0 + (int)s.turns.size(); other++)
+                for (int other = 0; other < kSlotTurn0 + (int)s.game.turns.size(); other++)
                     if (other != slot && slotKey(other) && *slotKey(other) == code) clash = other;
                 if (clash >= 0) log.push_back(keyName(code) + " is already the " + slotName(clash) + " key: not bound");
                 else if (int* k = slotKey(slot)) { *k = code; changed(); log.push_back("bound " + keyName(code) + " to " + slotName(slot)); }
             }
         }
-        if (sh.core.newC) { s.cHand = sh.core.cHand; s.cVirtual = sh.core.cVirtual; s.checked = sh.core.checked; changed(); }
+        if (sh.core.newC) { s.game.cHand = sh.core.cHand; s.game.cVirtual = sh.core.cVirtual; s.game.checked = sh.core.checked; changed(); }
         if (sh.core.armedNew && sh.core.armed != s.armed) { s.armed = sh.core.armed; changed(); }
         if (!sh.mouse.empty() && sh.mouse != s.mouse) { s.mouse = sh.mouse; changed(); }
     }
@@ -304,11 +304,11 @@ struct Ui {
         ImGui::PushFont(art.display, 30);
         ImGui::TextUnformatted("Spinjitzu");
         ImGui::PopFont();
-        if (!s.cHand) ImGui::TextColored(kSeal, "Not calibrated");
+        if (!s.game.cHand) ImGui::TextColored(kSeal, "Not calibrated");
         else {
-            ImGui::Text("%lld counts a turn by hand, %lld virtual,", (long long)s.cHand, (long long)s.cVirtual);
+            ImGui::Text("%lld counts a turn by hand, %lld virtual,", (long long)s.game.cHand, (long long)s.game.cVirtual);
             ImGui::SameLine();
-            if (s.checked) ImGui::TextColored(kIndigo, "checked");
+            if (s.game.checked) ImGui::TextColored(kIndigo, "checked");
             else ImGui::TextColored(kSeal, "not checked: test 360 in Calibrate");
         }
         ImGui::TextDisabled("%s", sh.core.doing.c_str());
@@ -362,7 +362,7 @@ struct Ui {
         ImGui::Text("Hand 360 key");  ImGui::SameLine(160); bindButton(kSlotCalibrate);
         ImGui::Text("Test 360 key");  ImGui::SameLine(160); bindButton(kSlotTest);
         ImGui::Spacing();
-        if (s.checked) {
+        if (s.game.checked) {
             if (sh.core.speedCheck == 1) ImGui::TextColored(kIndigo, "Speed check: it landed. The game does not see acceleration.");
             else if (sh.core.speedCheck == 2)
                 ImGui::TextColored(kSeal, "Speed check: %lld counts off. The game sees acceleration on Spinjitzu's mouse: see Output.",
@@ -391,10 +391,10 @@ struct Ui {
     }
 
     void turnsTab() {
-        if (!s.cHand) ImGui::TextColored(kSeal, "Calibrate first: turns need to know how far a full turn is.");
+        if (!s.game.cHand) ImGui::TextColored(kSeal, "Calibrate first: turns need to know how far a full turn is.");
         int remove = -1;
-        for (size_t i = 0; i < s.turns.size(); i++) {
-            TurnBind& t = s.turns[i];
+        for (size_t i = 0; i < s.game.turns.size(); i++) {
+            TurnBind& t = s.game.turns[i];
             ImGui::PushID((int)i);
             if (i) rule(1.4f, 10 + (uint32_t)i);
             // The turn drawn as an ensō at the right of its row.
@@ -413,22 +413,22 @@ struct Ui {
             if (t.own) { ImGui::Indent(); motionRow("own", &t.speed, &t.curve, &t.jitter); ImGui::Unindent(); }
             ImGui::PopID();
         }
-        if (remove >= 0) { s.turns.erase(s.turns.begin() + remove); changed(); }
+        if (remove >= 0) { s.game.turns.erase(s.game.turns.begin() + remove); changed(); }
         rule(1.4f, 3);
-        if (ImGui::Button("+ Add turn")) { s.turns.push_back(TurnBind{}); changed(); capturing = kSlotTurn0 + (int)s.turns.size() - 1; b.capture(capturing); }
+        if (ImGui::Button("+ Add turn")) { s.game.turns.push_back(TurnBind{}); changed(); capturing = kSlotTurn0 + (int)s.game.turns.size() - 1; b.capture(capturing); }
     }
 
     void boomerangTab() {
         ImGui::TextWrapped("Spins while its key is held; let go and it finishes facing where it started.");
         ImGui::Text("Key"); ImGui::SameLine(160); bindButton(kSlotBoomerang);
-        int dir = s.boom.dir < 0 ? 0 : 1;
+        int dir = s.game.boom.dir < 0 ? 0 : 1;
         ImGui::SetNextItemWidth(240);
-        if (ImGui::Combo("direction", &dir, "left\0right\0")) { s.boom.dir = dir ? 1 : -1; changed(); }
-        if (sliderTyped("spin", "degrees a second", &s.boom.speed, kSlowest, kFastest, "%.0f")) changed();
-        int fin = s.boom.finish == Finish::Forward ? 0 : 1;
+        if (ImGui::Combo("direction", &dir, "left\0right\0")) { s.game.boom.dir = dir ? 1 : -1; changed(); }
+        if (sliderTyped("spin", "degrees a second", &s.game.boom.speed, kSlowest, kFastest, "%.0f")) changed();
+        int fin = s.game.boom.finish == Finish::Forward ? 0 : 1;
         ImGui::SetNextItemWidth(240);
         if (ImGui::Combo("finish", &fin, "keep spinning to the start\0shortest way back\0")) {
-            s.boom.finish = fin ? Finish::Shortest : Finish::Forward;
+            s.game.boom.finish = fin ? Finish::Shortest : Finish::Forward;
             changed();
         }
         ImGui::TextDisabled("Your mouse movement while it spins is counted, so it still comes home.");
@@ -528,7 +528,7 @@ struct Ui {
             if (tab("Boomerang", 2)) { boomerangTab(); ImGui::EndTabItem(); }
             if (tab("Motion", 3)) {
                 ImGui::TextDisabled("For every turn without its own.");
-                motionRow("defaults", &s.speed, &s.curve, &s.jitter);
+                motionRow("defaults", &s.game.speed, &s.game.curve, &s.game.jitter);
                 ImGui::EndTabItem();
             }
             if (tab("Output", 4)) { outputTab(sh); ImGui::EndTabItem(); }

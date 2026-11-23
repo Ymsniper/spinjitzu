@@ -43,9 +43,9 @@ public:
     // Armed is not taken from them: settings the window sent before it heard
     // of an arm key press would put the old state back. It comes by arm().
     void use(const Settings& s) {
-        const bool newLedger = s.cVirtual != s_.cVirtual;
+        const bool newLedger = s.game.cVirtual != s_.game.cVirtual;
         s_ = s;
-        if (newLedger) ledger_ = Ledger(std::max<int64_t>(s_.cVirtual, kLeastCalibration));
+        if (newLedger) ledger_ = Ledger(std::max<int64_t>(s_.game.cVirtual, kLeastCalibration));
     }
 
     // Armed, as the window set it; told back, so both ends agree.
@@ -93,13 +93,13 @@ public:
         }
         if (code == s_.keyCalibrate) { calibrateKey(); return; }
         if (code == s_.keyTest) { testKey(t); return; }
-        const bool bound = code == s_.boom.key || std::any_of(s_.turns.begin(), s_.turns.end(), [&](const TurnBind& tb) { return tb.key == code; });
+        const bool bound = code == s_.game.boom.key || std::any_of(s_.game.turns.begin(), s_.game.turns.end(), [&](const TurnBind& tb) { return tb.key == code; });
         if (!bound) return;
         if (!armed_) { say(keyName(code) + " pressed, but not armed: click the seal at the top right"); return; }
-        if (s_.cVirtual < kLeastCalibration) { say(keyName(code) + " pressed, but not calibrated yet"); return; }
+        if (s_.game.cVirtual < kLeastCalibration) { say(keyName(code) + " pressed, but not calibrated yet"); return; }
         if (phase_ != Phase::Idle) return;
-        if (code == s_.boom.key) { startSpin(code, t); return; }
-        for (const TurnBind& tb : s_.turns)
+        if (code == s_.game.boom.key) { startSpin(code, t); return; }
+        for (const TurnBind& tb : s_.game.turns)
             if (tb.key == code) { startTurn(tb, t); return; }
     }
 
@@ -178,7 +178,7 @@ private:
     // Three times the spread of the hand 360s, or 0.3% of a turn while there
     // is only one: a landing nearer than this is on the mark.
     double tolerance() const {
-        double t = std::max(0.003 * (double)s_.cHand, 2.0);
+        double t = std::max(0.003 * (double)s_.game.cHand, 2.0);
         if (hands_.size() >= 2) {
             double mean = 0, var = 0;
             for (int64_t x : hands_) mean += (double)x;
@@ -203,15 +203,15 @@ private:
             hands_.push_back(*c);
             std::vector<int64_t> m = hands_;
             std::sort(m.begin(), m.end());
-            s_.cHand = m[m.size() / 2];
+            s_.game.cHand = m[m.size() / 2];
             // A new hand figure: the virtual mouse starts from it and is
             // checked again.
-            s_.cVirtual = s_.cHand;
-            s_.checked = false;
-            ledger_ = Ledger(s_.cVirtual);
+            s_.game.cVirtual = s_.game.cHand;
+            s_.game.checked = false;
+            ledger_ = Ledger(s_.game.cVirtual);
             publishC();
             say("hand 360 #" + std::to_string(hands_.size()) + ": " + std::to_string(*c) + " counts; using " +
-                std::to_string(s_.cHand) + ". Now " + keyName(s_.keyTest) + " to test it");
+                std::to_string(s_.game.cHand) + ". Now " + keyName(s_.keyTest) + " to test it");
         } else if (phase_ == Phase::Correcting) {
             const int64_t k = correction_;
             phase_ = Phase::Idle;
@@ -227,31 +227,31 @@ private:
                                  " counts off, so the game sees acceleration on Spinjitzu's mouse: see Output");
                 return;
             }
-            const auto c = corrected(s_.cVirtual, s_.cHand, k);
+            const auto c = corrected(s_.game.cVirtual, s_.game.cHand, k);
             if (!c) { say("that correction is not one a turn could need: do the hand 360 again"); return; }
-            s_.checked = std::fabs((double)k) <= tolerance();
-            s_.cVirtual = *c;
-            ledger_ = Ledger(s_.cVirtual);
+            s_.game.checked = std::fabs((double)k) <= tolerance();
+            s_.game.cVirtual = *c;
+            ledger_ = Ledger(s_.game.cVirtual);
             publishC();
-            say("test 360: corrected " + std::to_string(k) + " counts by hand; virtual " + std::to_string(s_.cVirtual) +
-                (s_.checked ? ", on the mark" : ", " + keyName(s_.keyTest) + " again to check it"));
+            say("test 360: corrected " + std::to_string(k) + " counts by hand; virtual " + std::to_string(s_.game.cVirtual) +
+                (s_.game.checked ? ", on the mark" : ", " + keyName(s_.keyTest) + " again to check it"));
         }
     }
 
     void testKey(Ns t) {
         if (phase_ != Phase::Idle) return;
-        if (s_.cHand < kLeastCalibration) { say("do a hand 360 first (" + keyName(s_.keyCalibrate) + ")"); return; }
+        if (s_.game.cHand < kLeastCalibration) { say("do a hand 360 first (" + keyName(s_.keyCalibrate) + ")"); return; }
         // Once a test has landed, the next one checks for acceleration: the
         // same 360 four times as fast lands on the mark only if speed does
         // not change how far the game turns.
-        speedTest_ = s_.checked;
+        speedTest_ = s_.game.checked;
         Motion::Orders o;
         o.degPerSec = speedTest_ ? 4 * 360.0 : 360.0;
-        motion_.start(s_.cVirtual, kFullTurnMilli, o, t);
+        motion_.start(s_.game.cVirtual, kFullTurnMilli, o, t);
         correction_ = 0;
         out_.calNet = 0;
         phase_ = Phase::Testing;
-        say((speedTest_ ? "speed check: a 360 at four times the speed, " : "test 360: ") + std::to_string(s_.cVirtual) + " counts");
+        say((speedTest_ ? "speed check: a 360 at four times the speed, " : "test 360: ") + std::to_string(s_.game.cVirtual) + " counts");
     }
 
     void startTurn(const TurnBind& tb, Ns t) {
@@ -260,9 +260,9 @@ private:
         const int64_t milli = *m * (tb.dir < 0 ? -1 : 1);
         const int64_t n = ledger_.begin(milli);
         Motion::Orders o;
-        o.degPerSec = tb.own ? tb.speed : s_.speed;
-        o.curve = tb.own ? tb.curve : s_.curve;
-        o.jitterPercent = tb.own ? tb.jitter : s_.jitter;
+        o.degPerSec = tb.own ? tb.speed : s_.game.speed;
+        o.curve = tb.own ? tb.curve : s_.game.curve;
+        o.jitterPercent = tb.own ? tb.jitter : s_.game.jitter;
         o.seed = ++seed_;
         motion_.start(n, milli, o, t);
         out_.last = {true, false, milli, n, 0};
@@ -271,11 +271,11 @@ private:
 
     void startSpin(int code, Ns t) {
         Spin::Orders o;
-        o.dir = s_.boom.dir;
-        o.countsPerSec = speedIn(s_.boom.speed) * (double)s_.cVirtual / 360.0;
-        o.finish = s_.boom.finish;
-        spin_.begin(s_.cVirtual, o, t);
-        scaler_ = Scaler(s_.cVirtual, std::max<int64_t>(s_.cHand, kLeastCalibration));
+        o.dir = s_.game.boom.dir;
+        o.countsPerSec = speedIn(s_.game.boom.speed) * (double)s_.game.cVirtual / 360.0;
+        o.finish = s_.game.boom.finish;
+        spin_.begin(s_.game.cVirtual, o, t);
+        scaler_ = Scaler(s_.game.cVirtual, std::max<int64_t>(s_.game.cHand, kLeastCalibration));
         spinKey_ = code;
         phase_ = Phase::Spinning;
     }
@@ -298,9 +298,9 @@ private:
 
     void publishC() {
         out_.newC = true;
-        out_.cHand = s_.cHand;
-        out_.cVirtual = s_.cVirtual;
-        out_.checked = s_.checked;
+        out_.cHand = s_.game.cHand;
+        out_.cVirtual = s_.game.cVirtual;
+        out_.checked = s_.game.checked;
     }
 
     Settings s_;
