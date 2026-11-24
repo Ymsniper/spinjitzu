@@ -20,7 +20,15 @@ struct Shown {                    // what the worker says, for the window
 class Bridge {
 public:
     // window side
-    void settings(const Settings& s) { std::lock_guard<std::mutex> l(m_); settings_ = s; settingsNew_ = true; }
+    // `newGame`: another profile; handed over with its settings in one go,
+    // so the worker never takes the one without the other.
+    void settings(const Settings& s, bool newGame = false) {
+        std::lock_guard<std::mutex> l(m_);
+        settings_ = s;
+        settingsNew_ = true;
+        gameNew_ = gameNew_ || newGame;
+    }
+    void focus(bool on) { std::lock_guard<std::mutex> l(m_); focus_ = on; focusNew_ = true; }
     void capture(int slot) { std::lock_guard<std::mutex> l(m_); capture_ = slot; captureNew_ = true; }
     void arm(bool on) { std::lock_guard<std::mutex> l(m_); arm_ = on; armNew_ = true; }
     void quit() { std::lock_guard<std::mutex> l(m_); quit_ = true; }
@@ -37,7 +45,12 @@ public:
     }
 
     // worker side
-    struct Orders { bool settingsNew = false, captureNew = false, armNew = false, arm = false, quit = false; Settings settings; int capture = -1; };
+    struct Orders {
+        bool settingsNew = false, gameNew = false, captureNew = false, armNew = false, arm = false, focusNew = false, focus = false,
+             quit = false;
+        Settings settings;
+        int capture = -1;
+    };
     Orders take() {
         std::lock_guard<std::mutex> l(m_);
         Orders o;
@@ -45,10 +58,13 @@ public:
         if (settingsNew_) o.settings = settings_;
         o.captureNew = captureNew_;
         o.capture = capture_;
+        o.gameNew = gameNew_;
         o.armNew = armNew_;
         o.arm = arm_;
+        o.focusNew = focusNew_;
+        o.focus = focus_;
         o.quit = quit_;
-        settingsNew_ = captureNew_ = armNew_ = false;
+        settingsNew_ = gameNew_ = captureNew_ = armNew_ = focusNew_ = false;
         return o;
     }
     void tell(const Core::Out& out) {
@@ -78,7 +94,8 @@ public:
 private:
     std::mutex m_;
     Settings settings_;
-    bool settingsNew_ = false, captureNew_ = false, armNew_ = false, arm_ = false, quit_ = false;
+    bool settingsNew_ = false, gameNew_ = false, captureNew_ = false, armNew_ = false, arm_ = false, focusNew_ = false,
+         focus_ = false, quit_ = false;
     int capture_ = -1;
     Shown shown_;
 };

@@ -68,28 +68,35 @@ inline bool numIn(const std::string& s, int64_t& v) {
     return r.ec == std::errc() && r.ptr == s.data() + s.size();
 }
 
-inline std::string toText(const Settings& s) {
-    auto curve = [](Curve c) { return c == Curve::Smooth ? "smooth" : "constant"; };
-    std::string o = "# spinjitzu settings\n";
+inline std::string globalText(const Settings& s) {
+    std::string o;
     o += "calibrate = " + codeName(s.keyCalibrate) + "\n";
     o += "test = " + codeName(s.keyTest) + "\n";
     o += "panic = " + codeName(s.keyPanic) + "\n";
     o += "arm = " + codeName(s.keyArm) + "\n";
-    o += "c_hand = " + std::to_string(s.game.cHand) + "\n";
-    o += "c_virtual = " + std::to_string(s.game.cVirtual) + "\n";
-    o += std::string("checked = ") + (s.game.checked ? "1" : "0") + "\n";
     o += std::string("armed = ") + (s.armed ? "1" : "0") + "\n";
-    o += "speed = " + num(s.game.speed) + "\n";
-    o += std::string("curve = ") + curve(s.game.curve) + "\n";
-    o += "jitter = " + num(s.game.jitter) + "\n";
     o += "mouse = " + s.mouse + "\n";
-    o += "boomerang = " + codeName(s.game.boom.key) + " " + std::to_string(s.game.boom.dir) + " " + num(s.game.boom.speed) + " " +
-         (s.game.boom.letThrough ? "through" : "block") + " " + (s.game.boom.finish == Finish::Forward ? "forward" : "shortest") + "\n";
-    for (const TurnBind& t : s.game.turns)
+    return o;
+}
+
+inline std::string gameText(const Game& g) {
+    auto curve = [](Curve c) { return c == Curve::Smooth ? "smooth" : "constant"; };
+    std::string o;
+    o += "c_hand = " + std::to_string(g.cHand) + "\n";
+    o += "c_virtual = " + std::to_string(g.cVirtual) + "\n";
+    o += std::string("checked = ") + (g.checked ? "1" : "0") + "\n";
+    o += "speed = " + num(g.speed) + "\n";
+    o += std::string("curve = ") + curve(g.curve) + "\n";
+    o += "jitter = " + num(g.jitter) + "\n";
+    o += "boomerang = " + codeName(g.boom.key) + " " + std::to_string(g.boom.dir) + " " + num(g.boom.speed) + " " +
+         (g.boom.letThrough ? "through" : "block") + " " + (g.boom.finish == Finish::Forward ? "forward" : "shortest") + "\n";
+    for (const TurnBind& t : g.turns)
         o += "turn = " + codeName(t.key) + " " + num(t.degrees) + " " + std::to_string(t.dir) + " " + (t.own ? "own" : "default") +
              " " + num(t.speed) + " " + curve(t.curve) + " " + num(t.jitter) + "\n";
     return o;
 }
+
+inline std::string toText(const Settings& s) { return "# spinjitzu settings\n" + globalText(s) + gameText(s.game); }
 
 inline std::vector<std::string> words(const std::string& s) {
     std::vector<std::string> w;
@@ -164,26 +171,153 @@ inline std::string settingsPath() {
     return dir + "/spinjitzu.cfg";
 }
 
-inline Settings loadSettings(const std::string& path) {
+// ── profiles ──────────────────────────────────────────────────────────────────
+// One game each, by a name the user gives. All in the one file: the global
+// keys, `profile = <the one in use>`, then a `[name]` section per profile with
+// the same lines as before. No file is named after what the user typed.
+
+struct Library {
+    Settings s;                       // what the tool works by: the globals and the profile in use
+    std::vector<std::string> names;   // every profile, in the order they were made
+    std::vector<Game> games;          // each one's game; the one in use lives in s.game until it is left
+    size_t current = 0;
+    bool migrated = false;            // read from a file written before profiles
+};
+
+constexpr size_t kLongestName = 40;   // bytes
+
+inline std::string trimmed(const std::string& n) {
+    const size_t a = n.find_first_not_of(" \t"), b = n.find_last_not_of(" \t");
+    return a == std::string::npos ? "" : n.substr(a, b - a + 1);
+}
+inline std::string folded(std::string n) {   // ASCII letters only: no locale decides it
+    for (char& c : n) if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    return n;
+}
+
+// Why `name` cannot be a profile's (other than profile `except`'s); empty if it can.
+inline std::string nameProblem(const Library& lib, const std::string& name, size_t except = (size_t)-1) {
+    if (name.empty()) return "a profile needs a name";
+    if (name.size() > kLongestName) return "a name of 40 letters at most";
+    if (name != trimmed(name)) return "no spaces at either end";
+    if (name.find_first_of("]\n\r") != std::string::npos) return "a name cannot hold ]";
+    for (size_t i = 0; i < lib.names.size(); i++)
+        if (i != except && folded(lib.names[i]) == folded(name)) return "there is a profile named " + lib.names[i] + " already";
+    return "";
+}
+
+// "Game 2", "Game 3": the first such name not taken.
+inline std::string freeName(const Library& lib) {
+    for (int i = (int)lib.names.size() + 1;; i++)
+        if (const std::string n = "Game " + std::to_string(i); nameProblem(lib, n).empty()) return n;
+}
+
+inline void switchTo(Library& lib, size_t i) {
+    if (i >= lib.names.size() || i == lib.current) return;
+    lib.games[lib.current] = lib.s.game;
+    lib.current = i;
+    lib.s.game = lib.games[i];
+}
+
+// A new profile keeps the turns, the boomerang and the motion of the one in
+// use, but not its calibration: that belongs to the old game.
+inline size_t addProfile(Library& lib, const std::string& name) {
+    Game g = lib.s.game;
+    g.cHand = g.cVirtual = 0;
+    g.checked = false;
+    lib.names.push_back(name);
+    lib.games.push_back(g);
+    switchTo(lib, lib.names.size() - 1);
+    return lib.current;
+}
+
+// The last profile cannot go. The one in use going, its neighbour takes over:
+// the one before it, or after it when it was the first.
+inline bool deleteProfile(Library& lib, size_t i) {
+    if (lib.names.size() < 2 || i >= lib.names.size()) return false;
+    if (i == lib.current) switchTo(lib, i > 0 ? i - 1 : 1);
+    lib.names.erase(lib.names.begin() + (long)i);
+    lib.games.erase(lib.games.begin() + (long)i);
+    if (lib.current > i) lib.current--;
+    return true;
+}
+
+inline std::string libraryText(const Library& lib) {
+    std::string o = "# spinjitzu settings\n" + globalText(lib.s) + "profile = " + lib.names[lib.current] + "\n";
+    for (size_t i = 0; i < lib.names.size(); i++)
+        o += "\n[" + lib.names[i] + "]\n" + gameText(i == lib.current ? lib.s.game : lib.games[i]);
+    return o;
+}
+
+// A file from before profiles is one profile, "Default", calibration and all.
+// A section whose name is not one a profile could have is skipped.
+inline Library libraryFrom(const std::string& text) {
+    Library lib;
+    std::string head, chosen;
+    std::vector<std::string> bodies;
+    bool inSection = false, anySection = false;
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string::npos) end = text.size();
+        const std::string line = text.substr(at, end - at);
+        at = end + 1;
+        if (line.size() >= 2 && line.front() == '[' && line.back() == ']') {
+            const std::string name = line.substr(1, line.size() - 2);
+            anySection = true;
+            inSection = nameProblem(lib, name).empty();
+            if (inSection) { lib.names.push_back(name); bodies.emplace_back(); }
+            continue;
+        }
+        if (inSection) bodies.back() += line + "\n";
+        else if (anySection) continue;   // the lines of a skipped section
+        else if (line.rfind("profile = ", 0) == 0) chosen = line.substr(10);
+        else head += line + "\n";
+    }
+    lib.s = fromText(head);
+    if (lib.names.empty()) {
+        lib.names.push_back("Default");
+        lib.games.push_back(lib.s.game);
+        lib.migrated = text.find(" = ") != std::string::npos;
+        return lib;
+    }
+    for (const std::string& b : bodies) lib.games.push_back(fromText(b).game);
+    for (size_t i = 0; i < lib.names.size(); i++) if (lib.names[i] == chosen) lib.current = i;
+    lib.s.game = lib.games[lib.current];
+    return lib;
+}
+
+inline std::string readFile(const std::string& path) {
     FILE* f = fopen(path.c_str(), "r");
-    if (!f) return Settings{};
+    if (!f) return "";
     std::string text;
     char b[4096];
     size_t n;
     while ((n = fread(b, 1, sizeof b, f)) > 0) text.append(b, n);
     fclose(f);
-    return fromText(text);
+    return text;
 }
 
-// Written beside the file and renamed over it, so a crash mid-write leaves
-// the last good settings, never half of them.
-inline bool saveSettings(const std::string& path, const Settings& s) {
-    const std::string tmp = path + ".new", text = toText(s);
+inline bool writeFile(const std::string& path, const std::string& text) {
+    const std::string tmp = path + ".new";
     FILE* f = fopen(tmp.c_str(), "w");
     if (!f) return false;
     const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
     if (fclose(f) != 0 || !ok) { remove(tmp.c_str()); return false; }
     return rename(tmp.c_str(), path.c_str()) == 0;
+}
+
+inline Library loadLibrary(const std::string& path) { return libraryFrom(readFile(path)); }
+
+// The first save over a file from before profiles keeps it beside, once.
+inline bool saveLibrary(const std::string& path, Library& lib) {
+    if (lib.migrated) {
+        const std::string old = path + ".before-profiles";
+        if (FILE* f = fopen(old.c_str(), "r")) fclose(f);
+        else writeFile(old, readFile(path));
+        lib.migrated = false;
+    }
+    return writeFile(path, libraryText(lib));
 }
 
 }  // namespace spinjitzu

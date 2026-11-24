@@ -73,6 +73,18 @@ int main() {
             "an Armed change is kept until the window looks, then handed over once");
     }
 
+    {
+        Bridge a;
+        Settings s;
+        s.game.cVirtual = 3000;
+        a.settings(s, true);              // another profile
+        s.game.speed = 900;
+        a.settings(s);                    // a slider moved before the worker looked
+        const Bridge::Orders o = a.take();
+        chk(o.gameNew && o.settingsNew && o.settings.game.cVirtual == 3000 && o.settings.game.speed == 900 && !a.take().gameNew,
+            "a profile switch is never lost to settings sent after it, and comes with the latest of them, once");
+    }
+
     // The arm key pressed an odd number of times in the worker while the
     // window keeps sending settings it changed for other reasons: no press
     // is lost or undone, and both sides end on the same state.

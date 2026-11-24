@@ -329,10 +329,94 @@ int main() {
         const Settings bad = fromText("c_hand = abc\nspeed = nan\njitter = 99\nturn = KEY_E 1e12 1 own 720 smooth 0\nturn = KEY_Q\ncalibrate = KEY_NOTHING\n");
         chk(bad.game.cHand == 0 && bad.game.speed == 720 && bad.game.jitter == kMostJitter && bad.game.turns.empty() && bad.keyCalibrate == KEY_F8,
             "a broken file: what does not parse keeps its default, out of range is held to range");
+    }
+
+    // ── profiles ────────────────────────────────────────────────────────────
+    {
+        Settings old;                          // a file from before profiles
+        old.keyArm = KEY_F6;
+        old.mouse = "Polaris";
+        old.game.cHand = 1437;
+        old.game.cVirtual = 1440;
+        old.game.checked = true;
+        old.game.turns.push_back({KEY_E, 90, -1, false, 720, Curve::Smooth, 0});
+        Library lib = libraryFrom(toText(old));
+        chk(lib.migrated && lib.names.size() == 1 && lib.names[0] == "Default" && lib.s.game.cVirtual == 1440 && lib.s.game.checked &&
+                lib.s.game.turns.size() == 1 && lib.s.keyArm == KEY_F6 && lib.s.mouse == "Polaris",
+            "a file from before profiles is the profile Default, calibration, turns and keys kept");
+        if (lib.s.game.turns.size() == 1) {   // the rest needs that turn
+
+        addProfile(lib, "The Finals");
+        chk(lib.current == 1 && lib.s.game.cHand == 0 && !lib.s.game.checked && lib.s.game.turns.size() == 1 && lib.s.keyArm == KEY_F6,
+            "a new profile is in use at once, uncalibrated, with the turns and the keys it came from");
+        lib.s.game.cHand = lib.s.game.cVirtual = 16000;
+        lib.s.game.turns[0].degrees = 180;
+        switchTo(lib, 0);
+        chk(lib.s.game.cVirtual == 1440 && lib.s.game.turns[0].degrees == 90, "back to the first profile: its own calibration and turns");
+        switchTo(lib, 1);
+        chk(lib.s.game.cVirtual == 16000 && lib.s.game.turns[0].degrees == 180, "and the second kept what was changed in it");
+
+        lib.s.armed = true;
+        const Library back = libraryFrom(libraryText(lib));
+        chk(back.names == lib.names && back.current == 1 && back.s.game.cVirtual == 16000 && back.games[0].cVirtual == 1440 &&
+                back.games[0].turns[0].degrees == 90 && back.s.armed && back.s.keyArm == KEY_F6 && !back.migrated,
+            "profiles read back as written: each game, which one is in use, the keys");
+
+        chk(!nameProblem(lib, "").empty() && !nameProblem(lib, " Apex").empty() && !nameProblem(lib, "a]b").empty() &&
+                !nameProblem(lib, std::string(41, 'x')).empty() && nameProblem(lib, std::string(40, 'x')).empty(),
+            "a name: not empty, no spaces at the ends, no ], 40 letters at most");
+        chk(!nameProblem(lib, "the finals").empty() && nameProblem(lib, "THE FINALS", 1).empty() && nameProblem(lib, "スピン術").empty(),
+            "names are one of a kind whatever their case, a profile may change its own case, any script will do");
+        chk(freeName(lib) == "Game 3", "a new profile's first name is one not taken");
+
+        addProfile(lib, "Apex");
+        chk(deleteProfile(lib, 2) && lib.current == 1 && lib.names[1] == "The Finals" && lib.s.game.cVirtual == 16000,
+            "deleting the profile in use goes to the one before it, with its game");
+        switchTo(lib, 0);
+        chk(deleteProfile(lib, 0) && lib.current == 0 && lib.names[0] == "The Finals" && lib.s.game.cVirtual == 16000,
+            "deleting the first, in use, goes to the one after it");
+        chk(!deleteProfile(lib, 0) && lib.names.size() == 1, "the last profile cannot be deleted");
+
+        const Library odd = libraryFrom("calibrate = KEY_F7\nprofile = Nowhere\n\n[a]b]\nc_hand = 5000\n[Ok]\nc_hand = 3000\n");
+        chk(odd.names.size() == 1 && odd.names[0] == "Ok" && odd.current == 0 && odd.s.game.cHand == 3000 && odd.s.keyCalibrate == KEY_F7,
+            "a section no profile could be named is skipped, lines and all; a profile in use that is not there is the first");
+
         const std::string p = "/tmp/spinjitzu_core_test.cfg";
-        chk(saveSettings(p, s) && loadSettings(p).game.cVirtual == 16511 && loadSettings("/nonexistent/x.cfg").game.cHand == 0,
-            "settings saved and loaded from a file; a missing file gives the defaults");
+        remove((p + ".before-profiles").c_str());
+        writeFile(p, toText(old));
+        Library mig = loadLibrary(p);
+        chk(saveLibrary(p, mig) && readFile(p + ".before-profiles") == toText(old) && loadLibrary(p).names[0] == "Default" &&
+                loadLibrary("/nonexistent/x.cfg").names.size() == 1 && !loadLibrary("/nonexistent/x.cfg").migrated,
+            "the first save over a file from before profiles keeps it beside; no file gives one empty profile");
         remove(p.c_str());
+        remove((p + ".before-profiles").c_str());
+        }
+    }
+    {
+        Rig r;
+        r.calibrate(16000);
+        r.c.newGame();
+        r.calibrate(8000);
+        chk(r.s.game.cHand == 8000, "another profile: the old game's hand 360s are not in the new one's median");
+        armed(r);
+        r.now += kTick; r.c.key(KEY_E, 1, r.now);
+        for (int i = 0; i < 20; i++) { r.now += kTick; r.sent += r.c.tick(r.now); }
+        r.c.newGame();
+        r.drain();
+        chk(r.c.idle() && r.said("stopped") && r.c.take().idle, "a turn under way when the profile changes stops");
+    }
+    {
+        Rig r;
+        armed(r);
+        r.c.windowFocus(true);
+        r.press(KEY_E); r.run();
+        r.press(KEY_Q); r.run();
+        int said = 0;
+        for (auto& l : r.log) said += l.find("window has the keyboard") != std::string::npos;
+        chk(r.sent == 0 && said == 1, "with Spinjitzu's window in front, typed letters are not turns, and it says so once");
+        r.c.windowFocus(false);
+        r.press(KEY_E); r.run();
+        chk(r.sent == 250, "the game in front again, the turn key turns");
     }
 
     printf("%s (%d of %d failed)\n", g_bad ? "FAILED" : "all good", g_bad, g_n);

@@ -29,6 +29,19 @@ key was pressed twice by mistake, or the wrong mouse was read).
 A calibration belongs to a profile (a game and its sensitivity). The hand
 calibration is taken on the real mouse.
 
+**Profiles.** One per game, named by the user. A profile holds that game's
+calibration, turns, boomerang and motion; the calibrate, test, panic and arm
+keys, Armed and the hand's mouse are the same for all. A menu beside the
+title switches, makes a new one (the turns of the one in use, no
+calibration), renames (40 letters at most, no `]`, one of a kind whatever the
+case) and deletes (asked first; never the last; the one in use going, the one
+before it takes over). It is disabled while a turn or a calibration runs. A
+switch reaches the worker with the new game's settings in one go: what runs
+stops, and the hand 360s, the speed check and a key awaited belonged to the
+old game. While Spinjitzu's own window has the keyboard, turn keys do
+nothing: letters typed there are names, not turns. The window's title names
+the profile in use.
+
 **Correction.** A hand 360 a few counts off becomes drift: 20 presses carry
 20 times the error. So the virtual mouse's figure is corrected: the tool
 turns its current `C` through it, the user corrects by hand to the
@@ -183,7 +196,10 @@ boomerang the hand's counts are added to the net (section 6).
 - `assets/`: Shojumaru (OFL, shipped unchanged, reserved name), a Noto Serif
   CJK JP subset (OFL), the Sensei, each font with its licence beside it. They
   are carried inside the binary.
-- Settings in `~/.config/spinjitzu/spinjitzu.cfg`, `key = value`.
+- Settings in `~/.config/spinjitzu/spinjitzu.cfg`, `key = value`: the global
+  keys, `profile = <in use>`, then a `[name]` section per profile. A file from
+  before profiles is the profile "Default"; the first save keeps it beside as
+  `spinjitzu.cfg.before-profiles`.
 
 ## 10. Menu
 
@@ -232,6 +248,10 @@ Offline, before anyone plays:
   and a refused near-zero result.
 - The speed check: it runs four times as fast, reports landed or off by how
   much, and leaves the settings exactly as they were.
+- Profiles: read back as written, a file from before them kept, a switch
+  keeping each game's own, the name and delete rules, the old game's hand
+  360s gone from the new one's median, a switch never lost to settings sent
+  after it.
 - The arm key: it switches, never turns, binds while a capture waits, and no
   press is lost or undone between the threads.
 - Every colour pair that carries text, held to its contrast.

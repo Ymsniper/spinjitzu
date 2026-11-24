@@ -31,6 +31,7 @@ public:
         bool newC = false;        // the calibration changed: save these
         bool armedNew = false;    // Armed changed: show and save `armed`
         bool armed = false;
+        bool idle = true;         // nothing under way and no key awaited: a profile may be switched
         int speedCheck = 0;       // 0: not done, 1: the fast 360 landed, 2: it did not
         int64_t speedOff = 0;     // by how many counts it did not
         int64_t cHand = 0, cVirtual = 0;
@@ -47,6 +48,21 @@ public:
         s_ = s;
         if (newLedger) ledger_ = Ledger(std::max<int64_t>(s_.game.cVirtual, kLeastCalibration));
     }
+
+    // Another profile, another game, before its settings come by use():
+    // what is under way stops, and the hand 360s, the speed check and a key
+    // awaited all belonged to the old one.
+    void newGame() {
+        panic();
+        hands_.clear();
+        out_.speedCheck = 0;
+        out_.speedOff = 0;
+        out_.calNet = 0;
+    }
+
+    // Spinjitzu's own window has the keyboard: letters typed there, a
+    // profile's name, are not turns.
+    void windowFocus(bool on) { focused_ = on; focusSaid_ = false; }
 
     // Armed, as the window set it; told back, so both ends agree.
     void arm(bool on) {
@@ -95,6 +111,11 @@ public:
         if (code == s_.keyTest) { testKey(t); return; }
         const bool bound = code == s_.game.boom.key || std::any_of(s_.game.turns.begin(), s_.game.turns.end(), [&](const TurnBind& tb) { return tb.key == code; });
         if (!bound) return;
+        if (focused_) {
+            if (!focusSaid_) say("turn keys do nothing while Spinjitzu's window has the keyboard: click the game");
+            focusSaid_ = true;
+            return;
+        }
         if (!armed_) { say(keyName(code) + " pressed, but not armed: click the seal at the top right"); return; }
         if (s_.game.cVirtual < kLeastCalibration) { say(keyName(code) + " pressed, but not calibrated yet"); return; }
         if (phase_ != Phase::Idle) return;
@@ -150,6 +171,7 @@ public:
     Out take() {
         out_.calibrating = phase_ == Phase::Recording;
         out_.correcting = phase_ == Phase::Correcting || phase_ == Phase::Testing;
+        out_.idle = phase_ == Phase::Idle && capturing_ < 0;
         out_.doing = doing();
         Out o = out_;
         out_.log.clear();
@@ -316,6 +338,7 @@ private:
     int capturing_ = -1, spinKey_ = 0;
     Ns captureFrom_ = 0;
     bool armed_ = false;
+    bool focused_ = false, focusSaid_ = false;
     bool down_[768] = {};
     uint32_t seed_ = 0;
     Out out_;

@@ -75,6 +75,8 @@ static void worker(Bridge& b) {
     for (;;) {
         const Bridge::Orders o = b.take();
         if (o.quit) break;
+        if (o.gameNew) core.newGame();   // before the new game's settings: it stops what ran on the old
+        if (o.focusNew) core.windowFocus(o.focus);
         if (o.settingsNew) {
             core.use(o.settings);
             if (o.settings.mouse != wantMouse) { mouseNode.clear(); wantMouse = o.settings.mouse; hand = wantMouse; b.tellDevices(hand, problem, "", node); }
@@ -224,9 +226,10 @@ static bool sliderTyped(const char* id, const char* label, double* v, double lo,
 }
 
 struct Ui {
-    Ui(Bridge& br, Settings st, std::string p) : b(br), s(std::move(st)), path(std::move(p)) {}
+    Ui(Bridge& br, Library l, std::string p) : b(br), lib(std::move(l)), path(std::move(p)) {}
     Bridge& b;
-    Settings s;
+    Library lib;
+    Settings& s = lib.s;          // what the tool works by: the globals and the profile in use
     std::string path;
     bool dirty = false;
     double changedAt = 0;
@@ -244,10 +247,77 @@ struct Ui {
     double openAt = -1;           // when the scroll began to open; <0: it is open
     bool shownArmed = false;      // what the seal and the title show
     double armedAt = -1e9;        // when that last changed
+    std::string shownTitle;
+    bool shownFocus = false;      // what the worker was last told of the keyboard
+    int renaming = -1;            // the profile whose name is being typed
+    char nameBuf[64] = "";
+    bool focusName = false, askDelete = false;
+    std::string nameError;
 
     double clock() const { return fixedClock >= 0 ? fixedClock : GetTime(); }
-    // The taskbar shows whether the turn keys work, while the game has focus.
-    void title() const { SetWindowTitle(shownArmed ? "Spinjitzu スピン術 (armed)" : "Spinjitzu スピン術 (not armed)"); }
+    // The taskbar shows which game's calibration is live and whether the
+    // turn keys work, while the game has focus.
+    void title() {
+        const std::string t = "Spinjitzu スピン術: " + lib.names[lib.current] + (shownArmed ? " (armed)" : " (not armed)");
+        if (t != shownTitle) { SetWindowTitle(t.c_str()); shownTitle = t; }
+    }
+    void saved() { dirty = true; changedAt = GetTime(); }
+    // Another profile is in use: its game goes to the worker with the order
+    // to drop what belonged to the old one.
+    void gameChanged() { capturing = -1; saved(); b.settings(s, true); }
+    void startRename() {
+        renaming = (int)lib.current;
+        snprintf(nameBuf, sizeof nameBuf, "%s", lib.names[lib.current].c_str());
+        focusName = true;
+        nameError.clear();
+    }
+
+    // The profiles, one per game: a menu beside the title to pick one, make a
+    // new one, rename or delete it. Not while something runs: a turn or a
+    // calibration belongs to the profile it began in.
+    void profileMenu(const Shown& sh) {
+        ImGui::SetNextItemWidth(240);
+        if (renaming >= 0) {
+            if (focusName) { ImGui::SetKeyboardFocusHere(); focusName = false; }
+            const bool enter = ImGui::InputText("##name", nameBuf, sizeof nameBuf,
+                                                ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+            if (enter) {
+                const std::string n = trimmed(nameBuf);
+                nameError = nameProblem(lib, n, (size_t)renaming);
+                if (nameError.empty()) { lib.names[(size_t)renaming] = n; renaming = -1; saved(); }
+                else focusName = true;
+            } else if (ImGui::IsItemDeactivated()) renaming = -1;   // Esc, or a click elsewhere
+            if (!nameError.empty()) ImGui::TextColored(kSeal, "%s", nameError.c_str());
+            else ImGui::TextDisabled("Enter keeps it, Esc cancels");
+            return;
+        }
+        ImGui::BeginDisabled(!sh.core.idle);
+        if (ImGui::BeginCombo("##profile", lib.names[lib.current].c_str())) {
+            for (size_t i = 0; i < lib.names.size(); i++)
+                if (ImGui::Selectable((lib.names[i] + "##" + std::to_string(i)).c_str(), i == lib.current) && i != lib.current) {
+                    switchTo(lib, i);
+                    gameChanged();
+                }
+            ImGui::Separator();
+            if (ImGui::Selectable("New profile")) { addProfile(lib, freeName(lib)); gameChanged(); startRename(); }
+            if (ImGui::Selectable("Rename")) startRename();
+            if (lib.names.size() > 1 && ImGui::Selectable("Delete")) askDelete = true;
+            ImGui::EndCombo();
+        }
+        ImGui::EndDisabled();
+        if (!sh.core.idle && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Not while a turn or a calibration runs");
+        // Opened here, not inside the menu, where the popup's id would not match.
+        if (askDelete) { ImGui::OpenPopup("delete profile"); askDelete = false; }
+        if (ImGui::BeginPopupModal("delete profile", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+            ImGui::Text("Delete the profile %s?", lib.names[lib.current].c_str());
+            ImGui::TextUnformatted("Its calibration and turns are gone for good.");
+            if (ImGui::Button("Delete")) { deleteProfile(lib, lib.current); gameChanged(); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine();
+            if (ImGui::Button("Keep it") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
 
     int* slotKey(int slot) {
         if (slot == kSlotCalibrate) return &s.keyCalibrate;
@@ -264,7 +334,7 @@ struct Ui {
           : slot == kSlotBoomerang ? "boomerang" : slot == kSlotArm ? "arm" : "turn " + std::to_string(slot - kSlotTurn0 + 1);
         return n.c_str();
     }
-    void changed() { dirty = true; changedAt = GetTime(); b.settings(s); }
+    void changed() { saved(); b.settings(s); }
 
     // The key a slot is bound to, as a button: pressed, it waits for the next
     // key or button on any device.
@@ -282,8 +352,10 @@ struct Ui {
         if (log.size() > 60) log.erase(log.begin(), log.end() - 60);
         if (sh.core.captureSlot >= 0) {
             const int slot = sh.core.captureSlot, code = sh.core.captured;
+            // A key asked for before a profile switch binds nothing in the new one.
+            const bool asked = capturing == slot;
             capturing = -1;
-            if (code > 0) {
+            if (asked && code > 0) {
                 int clash = -1;
                 for (int other = 0; other < kSlotTurn0 + (int)s.game.turns.size(); other++)
                     if (other != slot && slotKey(other) && *slotKey(other) == code) clash = other;
@@ -304,6 +376,9 @@ struct Ui {
         ImGui::PushFont(art.display, 30);
         ImGui::TextUnformatted("Spinjitzu");
         ImGui::PopFont();
+        ImGui::SameLine(0, 18);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
+        profileMenu(sh);
         if (!s.game.cHand) ImGui::TextColored(kSeal, "Not calibrated");
         else {
             ImGui::Text("%lld counts a turn by hand, %lld virtual,", (long long)s.game.cHand, (long long)s.game.cVirtual);
@@ -495,8 +570,9 @@ struct Ui {
         if (s.armed != shownArmed) {
             shownArmed = s.armed;
             armedAt = clock();
-            title();
         }
+        title();
+        if (fixedClock < 0 && IsWindowFocused() != shownFocus) { shownFocus = !shownFocus; b.focus(shownFocus); }
         // Opening, nothing takes a click: the click that skips it lands on
         // no control under the roll.
         const bool opening = openAt >= 0 && clock() - openAt < kOpenHold + kOpenRoll;
@@ -543,7 +619,7 @@ struct Ui {
                 openAt = -1;
         } else openAt = -1;
         // Written once the changes stop, not on every step of a slider.
-        if (dirty && !path.empty() && GetTime() - changedAt > 0.5) { saveSettings(path, s); dirty = false; }
+        if (dirty && !path.empty() && GetTime() - changedAt > 0.5) { saveLibrary(path, lib); dirty = false; }
     }
 };
 
@@ -554,7 +630,7 @@ int main(int argc, char** argv) {
     const bool shot = argc >= 3 && !strcmp(argv[1], "--shot");
     const std::string path = settingsPath();
     Bridge b;
-    Ui ui(b, loadSettings(path), shot ? "" : path);
+    Ui ui(b, loadLibrary(path), shot ? "" : path);
     b.settings(ui.s);
     b.arm(ui.s.armed);
     std::thread w;
@@ -613,7 +689,7 @@ int main(int argc, char** argv) {
         draw();
         EndDrawing();
     }
-    if (ui.dirty) saveSettings(path, ui.s);
+    if (ui.dirty || ui.lib.migrated) saveLibrary(path, ui.lib);
     b.quit();
     w.join();
     rlImGuiShutdown();
