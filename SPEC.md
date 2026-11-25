@@ -233,7 +233,8 @@ Shojumaru sets the title and the tabs; the Noto subset sets the rest and
 - **Footer**: the last turn, its degrees and counts, "stopped: N of M" when
   cut short, and an ensō drawing the turn as it goes out; spinning during a
   boomerang.
-- `spinjitzu --shot out.png <tab> [seconds] [armed]` draws the window off
+- `spinjitzu --shot out.png [tab] [seconds] [armed]` (tab 0 to 4: Calibrate,
+  Turns, Boomerang, Motion, Output; armed 0 or 1) draws the window off
   screen into a picture, at a set time of the opening, without opening any
   device or writing the settings.
 

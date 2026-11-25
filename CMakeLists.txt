@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)   # file(CONFIGURE), for the embedded assets
 project(spinjitzu CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -53,8 +53,10 @@ add_executable(spike src/spike/main.cpp)
 target_include_directories(spike PRIVATE ${EVDEV_INCLUDE_DIRS})
 target_link_libraries(spike ${EVDEV_LIBRARIES})
 
+enable_testing()
 foreach(t engine_test spike_test core_test bridge_test theme_test devices_test)
     add_executable(${t} tests/${t}.cpp)
     target_include_directories(${t} PRIVATE ${EVDEV_INCLUDE_DIRS})
     target_link_libraries(${t} ${EVDEV_LIBRARIES} Threads::Threads)
+    add_test(NAME ${t} COMMAND ${t})
 endforeach()
